@@ -1,8 +1,10 @@
-
 IMG_NAME=versanode-os
 RELEASE=bookworm
-ARCH=armhf
+ARCH=arm64
 ENABLE_SSH=1
-
-# Important: include our custom stage between stage1 and stage2
+FIRST_USER_NAME=pi
+FIRST_USER_PASS=raspberry
+DISABLE_FIRST_BOOT_USER_RENAME=1
+DEBIAN_FRONTEND=noninteractive
+APT_LISTCHANGES_FRONTEND=none
 STAGE_LIST="stage0 stage1 stage1-kmods stage2 stage3 stage4 stage5 export-image"
