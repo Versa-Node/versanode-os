@@ -2,3 +2,7 @@
 	path = pi-gen
 	url = https://github.com/RPi-Distro/pi-gen.git
 	branch = master
+[submodule "stages/stage1-kmods"]
+	path = stages/stage1-kmods
+	url = https://github.com/Versa-Node/versanode-kmods.git
+	branch = main
