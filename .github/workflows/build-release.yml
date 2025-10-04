@@ -10,7 +10,7 @@ on:
       release:
         description: "Publish GitHub Release?"
         type: boolean
-        default: false
+        default: true
       upload_artifacts:
         description: "Upload build artifacts?"
         type: boolean
