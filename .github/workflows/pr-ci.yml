@@ -1,0 +1,56 @@
+name: PR CI (lint & sanity)
+
+on:
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Submodule status
+        run: git submodule status --recursive || true
+
+      - name: Ensure required submodules exist
+        run: |
+          test -d pi-gen || { echo "::error::'pi-gen' submodule missing"; exit 1; }
+          if [ ! -d stages/stage1-kmods ]; then
+            echo "::warning::'stages/stage1-kmods' submodule not found (ok if not used)"
+          fi
+
+      - name: Lint shell scripts
+        run: |
+          set -eux
+          shopt -s globstar nullglob
+          FILES=(scripts/**/*.sh stages/**/*.sh)
+          if [ ${#FILES[@]} -gt 0 ]; then
+            shellcheck "${FILES[@]}"
+          else
+            echo "No shell scripts to lint."
+          fi
+
+      - name: Lint Actions configs
+        uses: rhysd/actionlint@v1
+
+      - name: Validate config (if present)
+        run: |
+          if [ -f config ]; then
+            echo "Found config:"
+            sed -n '1,200p' config
+            grep -E '^IMG_NAME=' config >/dev/null || { echo "::error::IMG_NAME missing in config"; exit 1; }
+            grep -E '^RELEASE='  config >/dev/null || { echo "::error::RELEASE missing in config"; exit 1; }
+            grep -E '^ARCH='     config >/dev/null || { echo "::error::ARCH missing in config"; exit 1; }
+          else
+            echo "No config file; workflow-dispatch can provide one."
+          fi

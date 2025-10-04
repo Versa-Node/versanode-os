@@ -1,0 +1,125 @@
+name: Build & Release Versanode OS Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      use_repo_config:
+        description: "Use repo's config file"
+        type: boolean
+        default: true
+      img_name:
+        description: "IMG_NAME (ignored if use_repo_config=true)"
+        default: "versanode-os"
+        required: false
+      release:
+        description: "Debian release (bookworm/trixie) (ignored if use_repo_config=true)"
+        default: "bookworm"
+        required: false
+      arch:
+        description: "Target arch (armhf/arm64) (ignored if use_repo_config=true)"
+        default: "arm64"
+        required: false
+      stage_list:
+        description: "Space-separated stages (ignored if use_repo_config=true)"
+        default: "stage0 stage1 stage1-kmods stage2 stage3 stage4 stage5 export-image"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Free disk space
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo apt-get clean
+          df -h
+
+      - name: Setup QEMU for cross-arch emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm,arm64
+
+      - name: Show repository config (if present)
+        run: |
+          echo "==== Repo config (if any) ===="
+          if [ -f config ]; then sed -n '1,120p' config; else echo "(none)"; fi
+          echo "==============================="
+
+      - name: Create CI config (when not using repo config)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.use_repo_config != true }}
+        run: |
+          set -eux
+          cat > ci-config <<'EOF'
+          IMG_NAME=${{ inputs.img_name }}
+          RELEASE=${{ inputs.release }}
+          ARCH=${{ inputs.arch }}
+          ENABLE_SSH=1
+          FIRST_USER_NAME=pi
+          FIRST_USER_PASS=raspberry
+          STAGE_LIST="${{ inputs.stage_list }}"
+          CHROOT_SKIP_FIRST_BOOT_USER_RENAME=1
+          SKIP_FIRST_BOOT_USER_RENAME=1
+          EOF
+          echo "==== CI config ===="
+          cat ci-config
+
+      - name: Build image with pi-gen (Docker)
+        env:
+          BUILD_WITH_DOCKER: "1"
+          CONFIG: ${{ github.event_name == 'workflow_dispatch' && inputs.use_repo_config != true && 'ci-config' || 'config' }}
+          CHROOT_SKIP_FIRST_BOOT_USER_RENAME: "1"
+          SKIP_FIRST_BOOT_USER_RENAME: "1"
+        run: |
+          set -euxo pipefail
+          find pi-gen -type f -name '*.sh' -exec chmod +x {} \; || true
+          sudo rm -rf pi-gen/work pi-gen/deploy || true
+          sudo rm -rf deploy || true
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          pushd pi-gen
+          sudo --preserve-env=BUILD_WITH_DOCKER,CONFIG,CHROOT_SKIP_FIRST_BOOT_USER_RENAME,SKIP_FIRST_BOOT_USER_RENAME bash ./build.sh
+          popd
+          mkdir -p artifacts
+          if [ -d deploy ]; then cp -av deploy/* artifacts/ || true; fi
+          if [ -d pi-gen/deploy ]; then cp -av pi-gen/deploy/* artifacts/ || true; fi
+          ls -lah artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: versanode-os-image-${{ github.ref_name || github.run_id }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

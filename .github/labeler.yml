@@ -1,0 +1,12 @@
+area:workflows:
+  - .github/workflows/**
+
+area:stages:
+  - stages/**
+
+area:scripts:
+  - scripts/**
+
+area:docs:
+  - '**/*.md'
+  - docs/**
