@@ -110,10 +110,10 @@ Key variables in `config`:
 
 ## Cloning this repo (with submodules)
 
-Always clone with submodules so `pi-gen` and custom stages are present:
+Always clone with submodules so `pi-gen` and custom stages are present:   
 
 ```bash
-git clone --recurse-submodules https://github.com/<your-username>/versanode-os.git
+git clone --recurse-submodules https://github.com/Versa-Node/versanode-os.git
 cd versanode-os
 git submodule update --init --recursive
 ```
