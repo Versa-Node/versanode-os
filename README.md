@@ -42,7 +42,7 @@ This repo produces a bootable `.img` (and `.img.xz`) you can flash to an SD card
 
 1) **Clone with submodules**
 ```bash
-git clone --recurse-submodules https://github.com/<your-username>/versanode-os.git
+git clone --recurse-submodules https://github.com/Versa-Node/versanode-os.git
 cd versanode-os
 # If you forgot --recurse-submodules:
 git submodule update --init --recursive
