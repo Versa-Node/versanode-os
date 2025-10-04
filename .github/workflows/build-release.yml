@@ -23,14 +23,40 @@ on:
         description: "Raspberry Pi OS release (bookworm/trixie)"
         default: "bookworm"
         required: true
+      variant:
+        description: "Image size (lite|normal|full) — use lite for CI"
+        default: "normal"
+        required: true
 
 jobs:
   build:
-    name: Build image
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
+      - name: Maximize disk space (remove SDKs, caches, Docker images)
+        uses: jlumbroso/free-disk-space@v1.3.0
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Extra prune & show free space
+        run: |
+          docker system prune -af || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -38,7 +64,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Set up QEMU (for cross-arch emulation inside Docker)
+      - name: Set up QEMU (emulation inside Docker)
         uses: docker/setup-qemu-action@v3
 
       - name: Install host dependencies
@@ -51,6 +77,7 @@ jobs:
       - name: Prepare effective config (apply inputs)
         run: |
           cp -f config config.effective || touch config.effective
+          # Hard defaults that avoid interactive prompts and shrink outputs
           grep -q '^ARCH=' config.effective || echo 'ARCH=arm64' >> config.effective
           grep -q '^RELEASE=' config.effective || echo 'RELEASE=bookworm' >> config.effective
           grep -q '^ENABLE_SSH=' config.effective || echo 'ENABLE_SSH=1' >> config.effective
@@ -59,8 +86,24 @@ jobs:
           grep -q '^DISABLE_FIRST_BOOT_USER_RENAME=' config.effective || echo 'DISABLE_FIRST_BOOT_USER_RENAME=1' >> config.effective
           grep -q '^DEBIAN_FRONTEND=' config.effective || echo 'DEBIAN_FRONTEND=noninteractive' >> config.effective
           grep -q '^APT_LISTCHANGES_FRONTEND=' config.effective || echo 'APT_LISTCHANGES_FRONTEND=none' >> config.effective
+          # Crucial: only emit .img.xz to save a ton of space
+          sed -i '/^DEPLOY_COMPRESSION=/d' config.effective
+          echo 'DEPLOY_COMPRESSION=xz' >> config.effective
+          grep -q '^COMPRESSION_LEVEL=' config.effective || echo 'COMPRESSION_LEVEL=6' >> config.effective
+
+          # Inputs
           sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
           sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
+
+          # Variant controls how many stages we build (to keep CI light if needed)
+          case "${{ inputs.variant }}" in
+            lite)   STAGES="stage0 stage1 stage2 export-image" ;;
+            normal) STAGES="stage0 stage1 stage1-kmods stage2 stage3 stage4 export-image" ;;
+            full)   STAGES="stage0 stage1 stage1-kmods stage2 stage3 stage4 stage5 export-image" ;;
+          esac
+          sed -i '/^STAGE_LIST=/d' config.effective
+          echo "STAGE_LIST=\"$STAGES\"" >> config.effective
+
           echo "---- EFFECTIVE CONFIG ----"
           cat config.effective
 
@@ -69,33 +112,30 @@ jobs:
           cd pi-gen
           sudo CLEAN=1 BUILD_WITH_DOCKER=1 CONFIG=../config.effective bash ./build.sh
 
-      - name: Collect and upload artifacts
+      # IMPORTANT: free the giant workdir BEFORE uploading artifacts to avoid hitting limits
+      - name: Remove work dir and show free space
+        run: |
+          du -sh pi-gen/work || true
+          sudo rm -rf pi-gen/work
+          df -h
+
+      - name: Collect and upload artifacts (.img.xz only)
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v4
         with:
-          name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}
+          name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}-${{ inputs.variant }}
           path: |
-            deploy/*.img
-            deploy/*.img.xz
-            pi-gen/deploy/*.img
             pi-gen/deploy/*.img.xz
-            deploy/*.zip
-            pi-gen/deploy/*.zip
-          if-no-files-found: warn
+          if-no-files-found: error
           compression-level: 9
 
       - name: Create GitHub Release
         if: ${{ inputs.release }}
         uses: softprops/action-gh-release@v2
         with:
-          name: "versanode-os ${{ inputs.release_codename }} (${{ inputs.arch }})"
+          name: "versanode-os ${{ inputs.release_codename }} (${{ inputs.arch }}) — ${{ inputs.variant }}"
           draft: false
           prerelease: false
           tag_name: "build-${{ github.run_number }}"
           files: |
-            deploy/*.img
-            deploy/*.img.xz
-            pi-gen/deploy/*.img
             pi-gen/deploy/*.img.xz
-            deploy/*.zip
-            pi-gen/deploy/*.zip
