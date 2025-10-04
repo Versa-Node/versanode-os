@@ -1,5 +1,22 @@
 # VersaNode OS
 
+<p align="center">
+  <!-- Workflows -->
+  <a href="https://github.com/Versa-Node/versanode-os/actions/workflows/ci.yml">
+    <img src="https://github.com/Versa-Node/versanode-os/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI (lint & sanity)" />
+  </a>
+  <a href="https://github.com/Versa-Node/versanode-os/actions/workflows/build-release.yml">
+    <img src="https://github.com/Versa-Node/versanode-os/actions/workflows/build-release.yml/badge.svg?branch=main" alt="Build & Release (pi-gen)" />
+  </a>
+  <a href="https://github.com/Versa-Node/versanode-os/actions/workflows/pr-labeler.yml">
+    <img src="https://github.com/Versa-Node/versanode-os/actions/workflows/pr-labeler.yml/badge.svg?branch=main" alt="PR Labeler" />
+  </a>
+  <a href="https://github.com/Versa-Node/versanode-os/actions/workflows/release-drafter.yml">
+    <img src="https://github.com/Versa-Node/versanode-os/actions/workflows/release-drafter.yml/badge.svg?branch=main" alt="Release Drafter" />
+  </a>
+</p>
+
+
 Custom Raspberry Pi OS image builder powered by [pi-gen](https://github.com/RPi-Distro/pi-gen).  
 This repo produces a bootable `.img` (and `.img.xz`) you can flash to an SD card for Raspberry Pi devices.
 

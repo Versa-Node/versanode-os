@@ -1,0 +1,21 @@
+name-template: "v$NEXT_PATCH_VERSION"
+tag-template: "v$NEXT_PATCH_VERSION"
+categories:
+  - title: "🚀 Features"
+    labels: ["feature", "enhancement"]
+  - title: "🐛 Fixes"
+    labels: ["bug", "fix"]
+  - title: "🧰 Maintenance"
+    labels: ["chore", "type: ci", "area: workflows"]
+  - title: "🧱 Builder"
+    labels: ["area: builder"]
+  - title: "📚 Docs"
+    labels: ["area: docs"]
+change-template: "- $TITLE (#$NUMBER) by @$AUTHOR"
+no-changes-template: "No significant changes."
+template: |
+  ## Changes
+  $CHANGES
+
+  ## Thanks
+  $CONTRIBUTORS
