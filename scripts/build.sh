@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Pull submodules if the repo has any
+if [ -f .gitmodules ]; then
+  git submodule sync --recursive
+  git submodule update --init --recursive
+fi
+
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PI_GEN_DIR="$ROOT/pi-gen"
