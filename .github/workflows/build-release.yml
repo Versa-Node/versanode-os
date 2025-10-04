@@ -3,33 +3,16 @@
 #
 # WHAT THIS WORKFLOW DOES
 # -----------------------
-# 1) You run it manually (Workflow Dispatch) and choose:
-#      - Git ref to build (branch or tag from THIS repo)
-#      - Raspberry Pi OS release (bookworm/trixie)
-#      - Architecture (arm64/armhf)
-#      - Variant (lite/normal/full)
-#      - Whether to upload artifacts and/or create a GitHub Release
+# 1) Manual trigger with inputs (arch, release, variant, etc.).
+# 2) Prepares config.effective for pi-gen (noninteractive, SSH on, xz output).
+# 3) Ensures QEMU is available on the host and that the pi-gen *container*
+#    includes tools export-image needs (bc, zerofree, bmap-tools, pigz, xxd).
+# 4) Builds via pi-gen's Docker wrapper and uploads *.img.xz.
+# 5) (Optional) Creates a GitHub Release attaching the image(s).
 #
-# 2) It prepares a pi-gen config (config.effective) with your inputs:
-#      - Forces noninteractive build, enables SSH, sets arch/release, etc.
-#      - Sets DEPLOY_COMPRESSION=xz so the output is a compact .img.xz
-#      - Sets STAGE_LIST according to the chosen variant (lite/normal/full)
-#      - Sets USE_QEMU=1 (required when cross-building on GitHub runners)
-#
-# 3) It builds the image using pi-gen’s Docker wrapper:
-#      - Uses ./pi-gen if it exists (submodule or committed)
-#      - If missing, it clones the correct pi-gen branch:
-#          arm64 => branch arm64, armhf => branch master
-#
-# 4) It uploads the resulting image(s) from pi-gen/deploy/*.img.xz as artifacts.
-#
-# 5) (Optional) It creates a GitHub Release and attaches the produced image(s).
-#
-# IMPORTANT
-# ---------
-# - The error “qemu-aarch64-static not found (please install qemu-user-static)”
-#   means the host is missing the static QEMU binaries. We fix this by installing
-#   qemu-user-static (and binfmt-support) on the runner **before** running pi-gen.
+# NOTE: The earlier “du: invalid zero-length file name” and “standard_in: 1:
+#       syntax error” came from missing `bc` (and friends) in the container.
+#       We harden the pi-gen Dockerfile before building to avoid that.
 # ------------------------------------------------------------------------------
 
 name: Build & Release (pi-gen)
@@ -73,7 +56,7 @@ jobs:
       contents: write
 
     steps:
-      # Reclaim space on the runner (pi-gen builds are large)
+      # Reclaim space on the runner (safe; not the cause of your error)
       - name: Maximize disk space (remove SDKs, caches, Docker images)
         uses: jlumbroso/free-disk-space@v1.3.0
         with:
@@ -103,14 +86,15 @@ jobs:
       - name: Set up QEMU (enable binfmt)
         uses: docker/setup-qemu-action@v3
 
-      # CRUCIAL: install static QEMU binaries on the host so build-docker.sh can mount them
-      - name: Install host dependencies (qemu-user-static, binfmt-support, etc.)
+      # Host-side tools (qemu-user-static, etc). These don't fix the bc issue
+      # inside the container, but are required for the wrapper to mount qemu.
+      - name: Install host dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qemu-user-static binfmt-support \
             quilt debootstrap libarchive-tools xz-utils kpartx dosfstools zip rsync \
-            coreutils curl git ca-certificates
+            coreutils curl git ca-certificates gpg parted e2fsprogs
 
       # Ensure we have pi-gen folder; if missing, clone the proper branch
       - name: Ensure pi-gen exists (clone if not present)
@@ -128,12 +112,29 @@ jobs:
           echo "Cloning RPi-Distro/pi-gen branch: ${BRANCH}"
           git clone --depth 1 --branch "${BRANCH}" https://github.com/RPi-Distro/pi-gen.git
 
+      # *** IMPORTANT FIX ***
+      # Some pi-gen Dockerfile variants can miss tools used in export-image.
+      # We append an explicit install so they are guaranteed to be present.
+      - name: Harden pi-gen Dockerfile with required tools (bc, zerofree, etc.)
+        working-directory: pi-gen
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEEDS_LINE='RUN apt-get update && apt-get install -y --no-install-recommends bc pigz xxd bmap-tools zerofree && rm -rf /var/lib/apt/lists/*'
+          if ! grep -q 'bc.*pigz.*xxd.*bmap-tools.*zerofree' Dockerfile; then
+            echo "" >> Dockerfile
+            echo "# Ensured by CI to satisfy export-image sizing & compression tools" >> Dockerfile
+            echo "${NEEDS_LINE}" >> Dockerfile
+          fi
+          echo "Final Dockerfile tail:"
+          tail -n 30 Dockerfile
+
       - name: Prepare effective config (apply inputs)
         shell: bash
         run: |
           set -euo pipefail
           cp -f config config.effective 2>/dev/null || : > config.effective
-          # Hard defaults to keep builds noninteractive and consistent
+          # Hard defaults (noninteractive, SSH on, etc.)
           grep -q '^ARCH=' config.effective || echo 'ARCH=arm64' >> config.effective
           grep -q '^RELEASE=' config.effective || echo 'RELEASE=bookworm' >> config.effective
           grep -q '^ENABLE_SSH=' config.effective || echo 'ENABLE_SSH=1' >> config.effective
@@ -143,7 +144,7 @@ jobs:
           grep -q '^DEBIAN_FRONTEND=' config.effective || echo 'DEBIAN_FRONTEND=noninteractive' >> config.effective
           grep -q '^APT_LISTCHANGES_FRONTEND=' config.effective || echo 'APT_LISTCHANGES_FRONTEND=none' >> config.effective
 
-          # Always produce .img.xz to save space
+          # Always produce .img.xz
           sed -i '/^DEPLOY_COMPRESSION=/d' config.effective
           echo 'DEPLOY_COMPRESSION=xz' >> config.effective
           grep -q '^COMPRESSION_LEVEL=' config.effective || echo 'COMPRESSION_LEVEL=6' >> config.effective
@@ -152,7 +153,11 @@ jobs:
           sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
           sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
 
-          # Use QEMU for cross-arch builds (prevents qemu-aarch64-static missing)
+          # Force IMG_NAME for stable paths (prevents empty-var glitches)
+          sed -i '/^IMG_NAME=/d' config.effective
+          echo 'IMG_NAME=versanode-os' >> config.effective
+
+          # Use QEMU for cross-arch builds
           sed -i '/^USE_QEMU=/d' config.effective
           echo 'USE_QEMU=1' >> config.effective
 
@@ -176,7 +181,6 @@ jobs:
         run: |
           set -euo pipefail
           # CLEAN=1 ensures a fresh build. Remove if you want to reuse state.
-          # The wrapper will bind-mount /usr/bin/qemu-*static from the host.
           sudo CLEAN=1 ./build-docker.sh -c ../config.effective
 
       - name: Show deploy contents
@@ -198,8 +202,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}-${{ inputs.variant }}
-          path: |
-            pi-gen/deploy/*.img.xz
+          path: pi-gen/deploy/*.img.xz
           if-no-files-found: error
           compression-level: 9
 
@@ -211,5 +214,4 @@ jobs:
           draft: false
           prerelease: false
           tag_name: "build-${{ github.run_number }}"
-          files: |
-            pi-gen/deploy/*.img.xz
+          files: pi-gen/deploy/*.img.xz
