@@ -1,0 +1,101 @@
+name: Build & Release (pi-gen)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch or tag)"
+        default: "main"
+        required: true
+      release:
+        description: "Publish GitHub Release?"
+        type: boolean
+        default: false
+      upload_artifacts:
+        description: "Upload build artifacts?"
+        type: boolean
+        default: true
+      arch:
+        description: "Architecture (arm64 or armhf)"
+        default: "arm64"
+        required: true
+      release_codename:
+        description: "Raspberry Pi OS release (bookworm/trixie)"
+        default: "bookworm"
+        required: true
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up QEMU (for cross-arch emulation inside Docker)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            quilt qemu-user-static debootstrap libarchive-tools arch-test \
+            xz-utils kpartx dosfstools zip rsync coreutils
+
+      - name: Prepare effective config (apply inputs)
+        run: |
+          cp -f config config.effective || touch config.effective
+          grep -q '^ARCH=' config.effective || echo 'ARCH=arm64' >> config.effective
+          grep -q '^RELEASE=' config.effective || echo 'RELEASE=bookworm' >> config.effective
+          grep -q '^ENABLE_SSH=' config.effective || echo 'ENABLE_SSH=1' >> config.effective
+          grep -q '^FIRST_USER_NAME=' config.effective || echo 'FIRST_USER_NAME=pi' >> config.effective
+          grep -q '^FIRST_USER_PASS=' config.effective || echo 'FIRST_USER_PASS=raspberry' >> config.effective
+          grep -q '^DISABLE_FIRST_BOOT_USER_RENAME=' config.effective || echo 'DISABLE_FIRST_BOOT_USER_RENAME=1' >> config.effective
+          grep -q '^DEBIAN_FRONTEND=' config.effective || echo 'DEBIAN_FRONTEND=noninteractive' >> config.effective
+          grep -q '^APT_LISTCHANGES_FRONTEND=' config.effective || echo 'APT_LISTCHANGES_FRONTEND=none' >> config.effective
+          sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
+          sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
+          echo "---- EFFECTIVE CONFIG ----"
+          cat config.effective
+
+      - name: Build image (Docker)
+        run: |
+          cd pi-gen
+          sudo CLEAN=1 BUILD_WITH_DOCKER=1 CONFIG=../config.effective bash ./build.sh
+
+      - name: Collect and upload artifacts
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}
+          path: |
+            deploy/*.img
+            deploy/*.img.xz
+            pi-gen/deploy/*.img
+            pi-gen/deploy/*.img.xz
+            deploy/*.zip
+            pi-gen/deploy/*.zip
+          if-no-files-found: warn
+          compression-level: 9
+
+      - name: Create GitHub Release
+        if: ${{ inputs.release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "versanode-os ${{ inputs.release_codename }} (${{ inputs.arch }})"
+          draft: false
+          prerelease: false
+          tag_name: "build-${{ github.run_number }}"
+          files: |
+            deploy/*.img
+            deploy/*.img.xz
+            pi-gen/deploy/*.img
+            pi-gen/deploy/*.img.xz
+            deploy/*.zip
+            pi-gen/deploy/*.zip

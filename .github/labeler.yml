@@ -1,0 +1,19 @@
+"area: workflows":
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**"]
+
+"area: builder":
+  - changed-files:
+      - any-glob-to-any-file: ["pi-gen/**", "stages/**", "config", "scripts/**"]
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file: ["README.md", "docs/**", "**/*.md"]
+
+"type: ci":
+  - changed-files:
+      - any-glob-to-any-file: [".github/**"]
+
+"type: release":
+  - changed-files:
+      - any-glob-to-any-file: [".github/release-drafter.yml", ".github/workflows/build-release.yml"]

@@ -1,0 +1,27 @@
+- name: "area: workflows"
+  color: "0e8a16"
+  description: "GitHub Actions, workflows and automation"
+
+- name: "area: builder"
+  color: "c5def5"
+  description: "pi-gen, stages, config, build scripts"
+
+- name: "area: docs"
+  color: "5319e7"
+  description: "Documentation and markdown files"
+
+- name: "type: ci"
+  color: "fbca04"
+  description: "Continuous Integration related changes"
+
+- name: "type: release"
+  color: "fef2c0"
+  description: "Release process and notes"
+
+- name: "good first issue"
+  color: "7057ff"
+  description: "Good for newcomers"
+
+- name: "help wanted"
+  color: "008672"
+  description: "Extra attention is needed"
