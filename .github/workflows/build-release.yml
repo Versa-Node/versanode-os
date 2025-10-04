@@ -14,24 +14,22 @@
 #      - Forces noninteractive build, enables SSH, sets arch/release, etc.
 #      - Sets DEPLOY_COMPRESSION=xz so the output is a compact .img.xz
 #      - Sets STAGE_LIST according to the chosen variant (lite/normal/full)
+#      - Sets USE_QEMU=1 (required when cross-building on GitHub runners)
 #
 # 3) It builds the image using pi-gen’s Docker wrapper:
 #      - Uses ./pi-gen if it exists (submodule or committed)
-#      - If missing, it clones the correct pi-gen branch (arm64 -> arm64, armhf -> master)
+#      - If missing, it clones the correct pi-gen branch:
+#          arm64 => branch arm64, armhf => branch master
 #
-# 4) It uploads the resulting image(s) from pi-gen/deploy/*.img.xz as GitHub
-#    Actions artifacts. (If compression somehow differs, add *.img.gz or *.zip
-#    to the artifact path.)
+# 4) It uploads the resulting image(s) from pi-gen/deploy/*.img.xz as artifacts.
 #
 # 5) (Optional) It creates a GitHub Release and attaches the produced image(s).
 #
-# NOTES
-# -----
-# - This workflow frees a lot of disk space up-front to avoid running out on
-#   GitHub-hosted runners.
-# - If you rely on custom pi-gen stages, make sure they are present under ./pi-gen.
-# - If you need incremental builds, remove CLEAN=1 from the build step and/or
-#   keep the container by using PRESERVE_CONTAINER=1 CONTINUE=1.
+# IMPORTANT
+# ---------
+# - The error “qemu-aarch64-static not found (please install qemu-user-static)”
+#   means the host is missing the static QEMU binaries. We fix this by installing
+#   qemu-user-static (and binfmt-support) on the runner **before** running pi-gen.
 # ------------------------------------------------------------------------------
 
 name: Build & Release (pi-gen)
@@ -102,8 +100,17 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Set up QEMU (for cross-arch emulation inside Docker)
+      - name: Set up QEMU (enable binfmt)
         uses: docker/setup-qemu-action@v3
+
+      # CRUCIAL: install static QEMU binaries on the host so build-docker.sh can mount them
+      - name: Install host dependencies (qemu-user-static, binfmt-support, etc.)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-user-static binfmt-support \
+            quilt debootstrap libarchive-tools xz-utils kpartx dosfstools zip rsync \
+            coreutils curl git ca-certificates
 
       # Ensure we have pi-gen folder; if missing, clone the proper branch
       - name: Ensure pi-gen exists (clone if not present)
@@ -145,6 +152,10 @@ jobs:
           sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
           sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
 
+          # Use QEMU for cross-arch builds (prevents qemu-aarch64-static missing)
+          sed -i '/^USE_QEMU=/d' config.effective
+          echo 'USE_QEMU=1' >> config.effective
+
           # Variant -> stages
           case "${{ inputs.variant }}" in
             lite)   STAGES="stage0 stage1 stage2 export-image" ;;
@@ -165,6 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           # CLEAN=1 ensures a fresh build. Remove if you want to reuse state.
+          # The wrapper will bind-mount /usr/bin/qemu-*static from the host.
           sudo CLEAN=1 ./build-docker.sh -c ../config.effective
 
       - name: Show deploy contents
