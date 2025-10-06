@@ -37,8 +37,8 @@ on:
         default: "arm64"
         required: true
       release_codename:
-        description: "Raspberry Pi OS release (bookworm/trixie)"
-        default: "trixie"
+        description: "Raspberry Pi OS release (bookworm or trixie)"
+        default: "bookworm"
         required: true
       variant:
         description: "Image size (lite|normal|full)"
@@ -105,6 +105,7 @@ jobs:
             echo "Found existing ./pi-gen"
             exit 0
           fi
+          # 32-bit images (armhf): master; 64-bit images (arm64): arm64
           BRANCH="master"
           if [ "${{ inputs.arch }}" = "arm64" ]; then
             BRANCH="arm64"
@@ -157,7 +158,7 @@ jobs:
           sed -i '/^IMG_NAME=/d' config.effective
           echo 'IMG_NAME=versanode-os' >> config.effective
 
-          # Use QEMU for cross-arch builds
+          # Use QEMU for cross-arch builds (GitHub runners are x86_64)
           sed -i '/^USE_QEMU=/d' config.effective
           echo 'USE_QEMU=1' >> config.effective
 
@@ -170,6 +171,17 @@ jobs:
           esac
           sed -i '/^STAGE_LIST=/d' config.effective
           echo "STAGE_LIST=\"${STAGES}\"" >> config.effective
+
+          # --- Sizing guards to avoid math/path glitches in export-image ---
+          sed -i '/^DEPLOY_MINIMIZEFS=/d' config.effective
+          echo 'DEPLOY_MINIMIZEFS=0' >> config.effective
+
+          sed -i '/^TARGET_IMAGE_SIZE=/d' config.effective
+          # Safe floor for lite; raise to 6144/8192 for normal/full if needed
+          echo 'TARGET_IMAGE_SIZE=4096' >> config.effective
+
+          sed -i '/^ROOT_MARGIN=/d' config.effective
+          echo 'ROOT_MARGIN=256' >> config.effective
 
           echo "---- EFFECTIVE CONFIG ----"
           cat config.effective
