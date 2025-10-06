@@ -1,10 +1,11 @@
 # ------------------------------------------------------------------------------
-# Build & Release (pi-gen) — MANUAL
+# Build & Release (pi-gen) — host mode (no Docker wrapper)
 #
-# - Verifies export-image tools exist INSIDE the pi-gen container (bc, pigz, xxd,
-#   bmap-tools, zerofree) before the long build.
-# - Writes a robust config.effective to avoid empty vars during sizing.
-# - Enables PI_GEN_DEBUG to surface computed sizes/paths.
+# Why host mode?
+# - Avoids the export-image path/size glitches causing:
+#   "du: invalid zero-length file name" + "standard_in: 1: syntax error"
+#   -> zero-sized image -> "The location ... is outside of the device".
+# - Installs the full dependency set on the runner and runs ./build.sh directly.
 # ------------------------------------------------------------------------------
 
 name: Build & Release (pi-gen)
@@ -25,7 +26,7 @@ on:
         type: boolean
         default: true
       arch:
-        description: "Architecture (arm64 or armhf)"
+        description: "Architecture (arm64 only here)"
         default: "arm64"
         required: true
       release_codename:
@@ -48,7 +49,7 @@ jobs:
       contents: write
 
     steps:
-      - name: Maximize disk space (remove SDKs, caches, Docker images)
+      - name: Free up disk space
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: true
@@ -74,19 +75,16 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Set up QEMU (enable binfmt)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Install host dependencies
+      - name: Install pi-gen host dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-user-static binfmt-support \
-            quilt debootstrap libarchive-tools xz-utils kpartx dosfstools zip rsync \
-            coreutils curl git ca-certificates gpg parted e2fsprogs
+            coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools e2fsprogs \
+            libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
+            kpartx kmod arch-test ca-certificates
 
-      - name: Ensure pi-gen exists (clone if not present)
+      - name: Ensure pi-gen exists (clone correct branch)
         shell: bash
         run: |
           set -euo pipefail
@@ -101,131 +99,68 @@ jobs:
           echo "Cloning RPi-Distro/pi-gen branch: ${BRANCH}"
           git clone --depth 1 --branch "${BRANCH}" https://github.com/RPi-Distro/pi-gen.git
 
-      # Ensure export-image toolchain is present inside the container image we will build
-      - name: Harden pi-gen Dockerfile with required tools (bc, zerofree, etc.)
-        working-directory: pi-gen
+      - name: Write effective config
         shell: bash
         run: |
           set -euo pipefail
-          LINE='RUN apt-get update && apt-get install -y --no-install-recommends bc pigz xxd bmap-tools zerofree && rm -rf /var/lib/apt/lists/*'
-          if ! grep -qE 'bc.*pigz.*xxd.*bmap-tools.*zerofree' Dockerfile; then
-            {
-              echo ""
-              echo "# Ensured by CI to satisfy export-image sizing & compression tools"
-              echo "${LINE}"
-            } >> Dockerfile
-          fi
-          echo "Final Dockerfile tail:"
-          tail -n 30 Dockerfile
+          : > config.effective
 
-      - name: Build pi-gen helper image and verify required tools
-        working-directory: pi-gen
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMG_TAG=pigen-helper:local
-          docker build -t "${IMG_TAG}" .
-          docker run --rm "${IMG_TAG}" sh -lc '
-            set -e
-            command -v bc >/dev/null && bc --version | head -1
-            command -v pigz >/dev/null && pigz --version | head -1
-            command -v xxd >/dev/null && xxd -v || true
-            command -v bmaptool >/dev/null && bmaptool --version | head -1
-            command -v zerofree >/dev/null && zerofree -V | head -1
-          '
+          # Arm64 only (as requested)
+          echo "ARCH=arm64" >> config.effective
 
-      - name: Prepare effective config (apply inputs)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp -f config config.effective 2>/dev/null || : > config.effective
+          # Release (bookworm/trixie)
+          echo "RELEASE=${{ inputs.release_codename }}" >> config.effective
 
-          # Baseline defaults
-          grep -q '^ARCH=' config.effective || echo 'ARCH=arm64' >> config.effective
-          grep -q '^RELEASE=' config.effective || echo 'RELEASE=bookworm' >> config.effective
-          grep -q '^ENABLE_SSH=' config.effective || echo 'ENABLE_SSH=1' >> config.effective
-          grep -q '^FIRST_USER_NAME=' config.effective || echo 'FIRST_USER_NAME=pi' >> config.effective
-          grep -q '^FIRST_USER_PASS=' config.effective || echo 'FIRST_USER_PASS=raspberry' >> config.effective
-          grep -q '^DISABLE_FIRST_BOOT_USER_RENAME=' config.effective || echo 'DISABLE_FIRST_BOOT_USER_RENAME=1' >> config.effective
-          grep -q '^DEBIAN_FRONTEND=' config.effective || echo 'DEBIAN_FRONTEND=noninteractive' >> config.effective
-          grep -q '^APT_LISTCHANGES_FRONTEND=' config.effective || echo 'APT_LISTCHANGES_FRONTEND=none' >> config.effective
+          # Safer defaults to avoid empty-var math in export-image
+          echo "ENABLE_SSH=1" >> config.effective
+          echo "FIRST_USER_NAME=pi" >> config.effective
+          echo "FIRST_USER_PASS=raspberry" >> config.effective
+          echo "DISABLE_FIRST_BOOT_USER_RENAME=1" >> config.effective
+          echo "DEBIAN_FRONTEND=noninteractive" >> config.effective
+          echo "APT_LISTCHANGES_FRONTEND=none" >> config.effective
 
-          # Always produce .img.xz and disable zip variant paths that can confuse older logic
-          sed -i '/^DEPLOY_COMPRESSION=/d' config.effective
-          echo 'DEPLOY_COMPRESSION=xz' >> config.effective
-          sed -i '/^COMPRESSION_LEVEL=/d' config.effective
-          echo 'COMPRESSION_LEVEL=6' >> config.effective
-          sed -i '/^ZIP_COMPRESSION_LEVEL=/d' config.effective
-          echo 'ZIP_COMPRESSION_LEVEL=6' >> config.effective
-          sed -i '/^DEPLOY_ZIP=/d' config.effective
-          echo 'DEPLOY_ZIP=0' >> config.effective
+          # Single compression format
+          echo "DEPLOY_COMPRESSION=xz" >> config.effective
+          echo "COMPRESSION_LEVEL=6" >> config.effective
+          echo "DEPLOY_ZIP=0" >> config.effective
 
-          # Cross-arch
-          sed -i '/^USE_QEMU=/d' config.effective
-          echo 'USE_QEMU=1' >> config.effective
+          # Cross-arch helpers still useful for qemu-user-static mounts
+          echo "USE_QEMU=1" >> config.effective
 
-          # Stable image name avoids empty-var path bugs in export-image
-          sed -i '/^IMG_NAME=/d' config.effective
-          echo 'IMG_NAME=versanode-os' >> config.effective
+          # Stable image name to prevent path glitches
+          echo "IMG_NAME=versanode-os" >> config.effective
 
-          # Sizing guards (prevent zero math)
-          sed -i '/^DEPLOY_MINIMIZEFS=/d' config.effective
-          echo 'DEPLOY_MINIMIZEFS=0' >> config.effective
-          sed -i '/^ROOT_MARGIN=/d' config.effective
-          echo 'ROOT_MARGIN=256' >> config.effective
-          sed -i '/^TARGET_IMAGE_SIZE=/d' config.effective
-          # Default for lite; bumped later for normal/full
-          echo 'TARGET_IMAGE_SIZE=4096' >> config.effective
-
-          # Apply inputs
-          sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
-          sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
-
-          # Variant -> stages + size
+          # Sizing guards (prevent zero math in prerun.sh)
+          echo "DEPLOY_MINIMIZEFS=0" >> config.effective
+          echo "ROOT_MARGIN=256" >> config.effective
+          # Variant -> stages + target size
           case "${{ inputs.variant }}" in
-            lite)
-              STAGES="stage0 stage1 stage2 export-image"
-              SIZE=4096
-              ;;
-            normal)
-              STAGES="stage0 stage1 stage2 stage3 stage4 export-image"
-              SIZE=6144
-              ;;
-            full)
-              STAGES="stage0 stage1 stage2 stage3 stage4 stage5 export-image"
-              SIZE=8192
-              ;;
-            *)
-              echo "Unknown variant: ${{ inputs.variant }}"; exit 1
-              ;;
+            lite)   STAGES="stage0 stage1 stage2 export-image"; SIZE=4096 ;;
+            normal) STAGES="stage0 stage1 stage2 stage3 stage4 export-image"; SIZE=6144 ;;
+            full)   STAGES="stage0 stage1 stage2 stage3 stage4 stage5 export-image"; SIZE=8192 ;;
+            *) echo "Unknown variant"; exit 1 ;;
           esac
-          sed -i '/^STAGE_LIST=/d' config.effective
           echo "STAGE_LIST=\"${STAGES}\"" >> config.effective
-          sed -i "s/^TARGET_IMAGE_SIZE=.*/TARGET_IMAGE_SIZE=${SIZE}/" config.effective
+          echo "TARGET_IMAGE_SIZE=${SIZE}" >> config.effective
 
           echo "---- EFFECTIVE CONFIG ----"
           cat config.effective
 
-      - name: Build image with pi-gen (Docker)
+      - name: Build image with pi-gen (host ./build.sh)
         working-directory: pi-gen
         shell: bash
+        env:
+          PI_GEN_DEBUG: "1"
         run: |
           set -euo pipefail
-          export PI_GEN_DEBUG=1
-          sudo CLEAN=1 ./build-docker.sh -c ../config.effective
+          # CLEAN=1 ensures a fresh build
+          sudo CLEAN=1 ./build.sh -c ../config.effective
 
       - name: Show deploy contents
         shell: bash
         run: |
           echo "Contents of pi-gen/deploy:"
           ls -lah pi-gen/deploy || true
-
-      - name: Remove work dir and show free space
-        shell: bash
-        run: |
-          du -sh pi-gen/work || true
-          sudo rm -rf pi-gen/work || true
-          df -h
 
       - name: Upload artifacts (.img.xz)
         if: ${{ inputs.upload_artifacts }}
