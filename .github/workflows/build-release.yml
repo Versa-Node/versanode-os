@@ -1,18 +1,10 @@
 # ------------------------------------------------------------------------------
 # Build & Release (pi-gen) — MANUAL
 #
-# WHAT THIS WORKFLOW DOES
-# -----------------------
-# 1) Manual trigger with inputs (arch, release, variant, etc.).
-# 2) Prepares config.effective for pi-gen (noninteractive, SSH on, xz output).
-# 3) Ensures QEMU is available on the host and that the pi-gen *container*
-#    includes tools export-image needs (bc, zerofree, bmap-tools, pigz, xxd).
-# 4) Builds via pi-gen's Docker wrapper and uploads *.img.xz.
-# 5) (Optional) Creates a GitHub Release attaching the image(s).
-#
-# NOTE: The earlier “du: invalid zero-length file name” and “standard_in: 1:
-#       syntax error” came from missing `bc` (and friends) in the container.
-#       We harden the pi-gen Dockerfile before building to avoid that.
+# - Verifies export-image tools exist INSIDE the pi-gen container (bc, pigz, xxd,
+#   bmap-tools, zerofree) before the long build.
+# - Writes a robust config.effective to avoid empty vars during sizing.
+# - Enables PI_GEN_DEBUG to surface computed sizes/paths.
 # ------------------------------------------------------------------------------
 
 name: Build & Release (pi-gen)
@@ -56,7 +48,6 @@ jobs:
       contents: write
 
     steps:
-      # Reclaim space on the runner (safe; not the cause of your error)
       - name: Maximize disk space (remove SDKs, caches, Docker images)
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
@@ -86,17 +77,15 @@ jobs:
       - name: Set up QEMU (enable binfmt)
         uses: docker/setup-qemu-action@v3
 
-      # Host-side tools (qemu-user-static, etc). These don't fix the bc issue
-      # inside the container, but are required for the wrapper to mount qemu.
       - name: Install host dependencies
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qemu-user-static binfmt-support \
             quilt debootstrap libarchive-tools xz-utils kpartx dosfstools zip rsync \
             coreutils curl git ca-certificates gpg parted e2fsprogs
 
-      # Ensure we have pi-gen folder; if missing, clone the proper branch
       - name: Ensure pi-gen exists (clone if not present)
         shell: bash
         run: |
@@ -105,7 +94,6 @@ jobs:
             echo "Found existing ./pi-gen"
             exit 0
           fi
-          # 32-bit images (armhf): master; 64-bit images (arm64): arm64
           BRANCH="master"
           if [ "${{ inputs.arch }}" = "arm64" ]; then
             BRANCH="arm64"
@@ -113,29 +101,46 @@ jobs:
           echo "Cloning RPi-Distro/pi-gen branch: ${BRANCH}"
           git clone --depth 1 --branch "${BRANCH}" https://github.com/RPi-Distro/pi-gen.git
 
-      # *** IMPORTANT FIX ***
-      # Some pi-gen Dockerfile variants can miss tools used in export-image.
-      # We append an explicit install so they are guaranteed to be present.
+      # Ensure export-image toolchain is present inside the container image we will build
       - name: Harden pi-gen Dockerfile with required tools (bc, zerofree, etc.)
         working-directory: pi-gen
         shell: bash
         run: |
           set -euo pipefail
-          NEEDS_LINE='RUN apt-get update && apt-get install -y --no-install-recommends bc pigz xxd bmap-tools zerofree && rm -rf /var/lib/apt/lists/*'
-          if ! grep -q 'bc.*pigz.*xxd.*bmap-tools.*zerofree' Dockerfile; then
-            echo "" >> Dockerfile
-            echo "# Ensured by CI to satisfy export-image sizing & compression tools" >> Dockerfile
-            echo "${NEEDS_LINE}" >> Dockerfile
+          LINE='RUN apt-get update && apt-get install -y --no-install-recommends bc pigz xxd bmap-tools zerofree && rm -rf /var/lib/apt/lists/*'
+          if ! grep -qE 'bc.*pigz.*xxd.*bmap-tools.*zerofree' Dockerfile; then
+            {
+              echo ""
+              echo "# Ensured by CI to satisfy export-image sizing & compression tools"
+              echo "${LINE}"
+            } >> Dockerfile
           fi
           echo "Final Dockerfile tail:"
           tail -n 30 Dockerfile
+
+      - name: Build pi-gen helper image and verify required tools
+        working-directory: pi-gen
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMG_TAG=pigen-helper:local
+          docker build -t "${IMG_TAG}" .
+          docker run --rm "${IMG_TAG}" sh -lc '
+            set -e
+            command -v bc >/dev/null && bc --version | head -1
+            command -v pigz >/dev/null && pigz --version | head -1
+            command -v xxd >/dev/null && xxd -v || true
+            command -v bmaptool >/dev/null && bmaptool --version | head -1
+            command -v zerofree >/dev/null && zerofree -V | head -1
+          '
 
       - name: Prepare effective config (apply inputs)
         shell: bash
         run: |
           set -euo pipefail
           cp -f config config.effective 2>/dev/null || : > config.effective
-          # Hard defaults (noninteractive, SSH on, etc.)
+
+          # Baseline defaults
           grep -q '^ARCH=' config.effective || echo 'ARCH=arm64' >> config.effective
           grep -q '^RELEASE=' config.effective || echo 'RELEASE=bookworm' >> config.effective
           grep -q '^ENABLE_SSH=' config.effective || echo 'ENABLE_SSH=1' >> config.effective
@@ -145,54 +150,68 @@ jobs:
           grep -q '^DEBIAN_FRONTEND=' config.effective || echo 'DEBIAN_FRONTEND=noninteractive' >> config.effective
           grep -q '^APT_LISTCHANGES_FRONTEND=' config.effective || echo 'APT_LISTCHANGES_FRONTEND=none' >> config.effective
 
-          # Always produce .img.xz
+          # Always produce .img.xz and disable zip variant paths that can confuse older logic
           sed -i '/^DEPLOY_COMPRESSION=/d' config.effective
           echo 'DEPLOY_COMPRESSION=xz' >> config.effective
-          grep -q '^COMPRESSION_LEVEL=' config.effective || echo 'COMPRESSION_LEVEL=6' >> config.effective
+          sed -i '/^COMPRESSION_LEVEL=/d' config.effective
+          echo 'COMPRESSION_LEVEL=6' >> config.effective
+          sed -i '/^ZIP_COMPRESSION_LEVEL=/d' config.effective
+          echo 'ZIP_COMPRESSION_LEVEL=6' >> config.effective
+          sed -i '/^DEPLOY_ZIP=/d' config.effective
+          echo 'DEPLOY_ZIP=0' >> config.effective
 
-          # Inputs -> config
-          sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
-          sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
-
-          # Force IMG_NAME for stable paths (prevents empty-var glitches)
-          sed -i '/^IMG_NAME=/d' config.effective
-          echo 'IMG_NAME=versanode-os' >> config.effective
-
-          # Use QEMU for cross-arch builds (GitHub runners are x86_64)
+          # Cross-arch
           sed -i '/^USE_QEMU=/d' config.effective
           echo 'USE_QEMU=1' >> config.effective
 
-          # Variant -> stages
+          # Stable image name avoids empty-var path bugs in export-image
+          sed -i '/^IMG_NAME=/d' config.effective
+          echo 'IMG_NAME=versanode-os' >> config.effective
+
+          # Sizing guards (prevent zero math)
+          sed -i '/^DEPLOY_MINIMIZEFS=/d' config.effective
+          echo 'DEPLOY_MINIMIZEFS=0' >> config.effective
+          sed -i '/^ROOT_MARGIN=/d' config.effective
+          echo 'ROOT_MARGIN=256' >> config.effective
+          sed -i '/^TARGET_IMAGE_SIZE=/d' config.effective
+          # Default for lite; bumped later for normal/full
+          echo 'TARGET_IMAGE_SIZE=4096' >> config.effective
+
+          # Apply inputs
+          sed -i "s/^ARCH=.*/ARCH=${{ inputs.arch }}/" config.effective
+          sed -i "s/^RELEASE=.*/RELEASE=${{ inputs.release_codename }}/" config.effective
+
+          # Variant -> stages + size
           case "${{ inputs.variant }}" in
-            lite)   STAGES="stage0 stage1 stage2 export-image" ;;
-            normal) STAGES="stage0 stage1 stage2 stage3 stage4 export-image" ;;
-            full)   STAGES="stage0 stage1 stage2 stage3 stage4 stage5 export-image" ;;
-            *)      echo "Unknown variant: ${{ inputs.variant }}"; exit 1 ;;
+            lite)
+              STAGES="stage0 stage1 stage2 export-image"
+              SIZE=4096
+              ;;
+            normal)
+              STAGES="stage0 stage1 stage2 stage3 stage4 export-image"
+              SIZE=6144
+              ;;
+            full)
+              STAGES="stage0 stage1 stage2 stage3 stage4 stage5 export-image"
+              SIZE=8192
+              ;;
+            *)
+              echo "Unknown variant: ${{ inputs.variant }}"; exit 1
+              ;;
           esac
           sed -i '/^STAGE_LIST=/d' config.effective
           echo "STAGE_LIST=\"${STAGES}\"" >> config.effective
-
-          # --- Sizing guards to avoid math/path glitches in export-image ---
-          sed -i '/^DEPLOY_MINIMIZEFS=/d' config.effective
-          echo 'DEPLOY_MINIMIZEFS=0' >> config.effective
-
-          sed -i '/^TARGET_IMAGE_SIZE=/d' config.effective
-          # Safe floor for lite; raise to 6144/8192 for normal/full if needed
-          echo 'TARGET_IMAGE_SIZE=4096' >> config.effective
-
-          sed -i '/^ROOT_MARGIN=/d' config.effective
-          echo 'ROOT_MARGIN=256' >> config.effective
+          sed -i "s/^TARGET_IMAGE_SIZE=.*/TARGET_IMAGE_SIZE=${SIZE}/" config.effective
 
           echo "---- EFFECTIVE CONFIG ----"
           cat config.effective
 
-      # Build using pi-gen's Docker wrapper, passing our config
       - name: Build image with pi-gen (Docker)
         working-directory: pi-gen
         shell: bash
         run: |
           set -euo pipefail
-          # CLEAN=1 ensures a fresh build. Remove if you want to reuse state.
+          export PI_GEN_DEBUG=1
           sudo CLEAN=1 ./build-docker.sh -c ../config.effective
 
       - name: Show deploy contents
@@ -201,7 +220,6 @@ jobs:
           echo "Contents of pi-gen/deploy:"
           ls -lah pi-gen/deploy || true
 
-      # Remove the big work dir before uploading to avoid hitting limits
       - name: Remove work dir and show free space
         shell: bash
         run: |
