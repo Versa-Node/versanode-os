@@ -38,7 +38,7 @@ on:
         required: true
       release_codename:
         description: "Raspberry Pi OS release (bookworm or trixie)"
-        default: "bookworm"
+        default: "trixie"
         required: true
       variant:
         description: "Image size (lite|normal|full)"
