@@ -58,7 +58,7 @@ jobs:
     steps:
       # Reclaim space on the runner (safe; not the cause of your error)
       - name: Maximize disk space (remove SDKs, caches, Docker images)
-        uses: jlumbroso/free-disk-space@v1.3.0
+        uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: true
           android: true
