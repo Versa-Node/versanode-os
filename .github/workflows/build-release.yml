@@ -1,13 +1,3 @@
-# ------------------------------------------------------------------------------
-# Build & Release (pi-gen) — host mode (no Docker wrapper)
-#
-# Why host mode?
-# - Avoids the export-image path/size glitches causing:
-#   "du: invalid zero-length file name" + "standard_in: 1: syntax error"
-#   -> zero-sized image -> "The location ... is outside of the device".
-# - Installs the full dependency set on the runner and runs ./build.sh directly.
-# ------------------------------------------------------------------------------
-
 name: Build & Release (pi-gen)
 
 on:
@@ -90,50 +80,35 @@ jobs:
           set -euo pipefail
           if [ -d "pi-gen" ]; then
             echo "Found existing ./pi-gen"
-            exit 0
+          else
+            BRANCH="master"
+            if [ "${{ inputs.arch }}" = "arm64" ]; then
+              BRANCH="arm64"
+            fi
+            echo "Cloning RPi-Distro/pi-gen branch: ${BRANCH}"
+            git clone --depth 1 --branch "${BRANCH}" https://github.com/RPi-Distro/pi-gen.git
           fi
-          BRANCH="master"
-          if [ "${{ inputs.arch }}" = "arm64" ]; then
-            BRANCH="arm64"
-          fi
-          echo "Cloning RPi-Distro/pi-gen branch: ${BRANCH}"
-          git clone --depth 1 --branch "${BRANCH}" https://github.com/RPi-Distro/pi-gen.git
 
       - name: Write effective config
         shell: bash
         run: |
           set -euo pipefail
           : > config.effective
-
-          # Arm64 only (as requested)
           echo "ARCH=arm64" >> config.effective
-
-          # Release (bookworm/trixie)
           echo "RELEASE=${{ inputs.release_codename }}" >> config.effective
-
-          # Safer defaults to avoid empty-var math in export-image
           echo "ENABLE_SSH=1" >> config.effective
           echo "FIRST_USER_NAME=pi" >> config.effective
           echo "FIRST_USER_PASS=raspberry" >> config.effective
           echo "DISABLE_FIRST_BOOT_USER_RENAME=1" >> config.effective
           echo "DEBIAN_FRONTEND=noninteractive" >> config.effective
           echo "APT_LISTCHANGES_FRONTEND=none" >> config.effective
-
-          # Single compression format
           echo "DEPLOY_COMPRESSION=xz" >> config.effective
           echo "COMPRESSION_LEVEL=6" >> config.effective
           echo "DEPLOY_ZIP=0" >> config.effective
-
-          # Cross-arch helpers still useful for qemu-user-static mounts
           echo "USE_QEMU=1" >> config.effective
-
-          # Stable image name to prevent path glitches
           echo "IMG_NAME=versanode-os" >> config.effective
-
-          # Sizing guards (prevent zero math in prerun.sh)
           echo "DEPLOY_MINIMIZEFS=0" >> config.effective
           echo "ROOT_MARGIN=256" >> config.effective
-          # Variant -> stages + target size
           case "${{ inputs.variant }}" in
             lite)   STAGES="stage0 stage1 stage2 export-image"; SIZE=4096 ;;
             normal) STAGES="stage0 stage1 stage2 stage3 stage4 export-image"; SIZE=6144 ;;
@@ -142,9 +117,69 @@ jobs:
           esac
           echo "STAGE_LIST=\"${STAGES}\"" >> config.effective
           echo "TARGET_IMAGE_SIZE=${SIZE}" >> config.effective
-
           echo "---- EFFECTIVE CONFIG ----"
           cat config.effective
+
+      - name: Inject export-image precheck (guards ROOTFS/BOOTFS and sizing)
+        working-directory: pi-gen
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p export-image/00-precheck
+          cat > export-image/00-precheck/00-run.sh <<'SH'
+          #!/bin/bash -eu
+          echo "[precheck] entering export-image precheck"
+          
+          : "${IMG_NAME:?IMG_NAME not set}"
+          : "${WORK_DIR:?WORK_DIR not set}"
+          : "${IMG_DATE:=$(date -u +%Y-%m-%d)}"
+          
+          BASE="${WORK_DIR}/${IMG_DATE}-${IMG_NAME}"
+          
+          # Find last stage with rootfs
+          LAST=""
+          LAST_STAGE=""
+          for s in stage5 stage4 stage3 stage2 stage1 stage0; do
+            if [ -d "${BASE}/${s}/rootfs" ]; then
+              LAST="${BASE}/${s}/rootfs"
+              LAST_STAGE="${s}"
+              break
+            fi
+          done
+          
+          if [ -z "${LAST}" ]; then
+            echo "[precheck] ERROR: no stage*/rootfs under ${BASE}" >&2
+            exit 94
+          fi
+          
+          # Export sane directories if unset
+          export ROOTFS_DIR="${ROOTFS_DIR:-${LAST}}"
+          if [ -d "${ROOTFS_DIR}/boot" ]; then
+            export BOOTFS_DIR="${BOOTFS_DIR:-${ROOTFS_DIR}/boot}"
+          fi
+          
+          # Provide export-image symlinks some scripts expect
+          mkdir -p "${BASE}/export-image"
+          [ -e "${BASE}/export-image/rootfs" ] || ln -s "${ROOTFS_DIR}" "${BASE}/export-image/rootfs"
+          if [ -n "${BOOTFS_DIR:-}" ]; then
+            [ -e "${BASE}/export-image/bootfs" ] || ln -s "${BOOTFS_DIR}" "${BASE}/export-image/bootfs"
+          fi
+          
+          # Guarantee a non-empty TARGET_IMAGE_SIZE
+          if [ -z "${TARGET_IMAGE_SIZE:-}" ]; then
+            export TARGET_IMAGE_SIZE=4096
+            echo "[precheck] TARGET_IMAGE_SIZE defaulted to 4096"
+          fi
+          
+          echo "[precheck] IMG_DATE=${IMG_DATE} IMG_NAME=${IMG_NAME}"
+          echo "[precheck] WORK_DIR=${WORK_DIR}"
+          echo "[precheck] LAST_STAGE=${LAST_STAGE}"
+          echo "[precheck] ROOTFS_DIR=${ROOTFS_DIR}"
+          echo "[precheck] BOOTFS_DIR=${BOOTFS_DIR:-<none>}"
+          echo "[precheck] TARGET_IMAGE_SIZE=${TARGET_IMAGE_SIZE}"
+          SH
+          chmod +x export-image/00-precheck/00-run.sh
+          echo "Injected export-image/00-precheck/00-run.sh"
 
       - name: Build image with pi-gen (host ./build.sh)
         working-directory: pi-gen
@@ -153,7 +188,6 @@ jobs:
           PI_GEN_DEBUG: "1"
         run: |
           set -euo pipefail
-          # CLEAN=1 ensures a fresh build
           sudo CLEAN=1 ./build.sh -c ../config.effective
 
       - name: Show deploy contents
