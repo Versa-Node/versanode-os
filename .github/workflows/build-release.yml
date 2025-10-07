@@ -74,121 +74,51 @@ jobs:
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
 
-      - name: Ensure pi-gen exists (clone correct branch)
+      - name: Write config (used by scripts/build.sh)
         shell: bash
         run: |
           set -euo pipefail
-          if [ -d "pi-gen" ]; then
-            echo "Found existing ./pi-gen"
-          else
-            BRANCH="master"
-            if [ "${{ inputs.arch }}" = "arm64" ]; then
-              BRANCH="arm64"
-            fi
-            echo "Cloning RPi-Distro/pi-gen branch: ${BRANCH}"
-            git clone --depth 1 --branch "${BRANCH}" https://github.com/RPi-Distro/pi-gen.git
-          fi
-
-      - name: Write effective config
-        shell: bash
-        run: |
-          set -euo pipefail
-          : > config.effective
-          echo "ARCH=arm64" >> config.effective
-          echo "RELEASE=${{ inputs.release_codename }}" >> config.effective
-          echo "ENABLE_SSH=1" >> config.effective
-          echo "FIRST_USER_NAME=pi" >> config.effective
-          echo "FIRST_USER_PASS=raspberry" >> config.effective
-          echo "DISABLE_FIRST_BOOT_USER_RENAME=1" >> config.effective
-          echo "DEBIAN_FRONTEND=noninteractive" >> config.effective
-          echo "APT_LISTCHANGES_FRONTEND=none" >> config.effective
-          echo "DEPLOY_COMPRESSION=xz" >> config.effective
-          echo "COMPRESSION_LEVEL=6" >> config.effective
-          echo "DEPLOY_ZIP=0" >> config.effective
-          echo "USE_QEMU=1" >> config.effective
-          echo "IMG_NAME=versanode-os" >> config.effective
-          echo "DEPLOY_MINIMIZEFS=0" >> config.effective
-          echo "ROOT_MARGIN=256" >> config.effective
+          : > config
+          echo "ARCH=arm64" >> config
+          echo "RELEASE=${{ inputs.release_codename }}" >> config
+          echo "ENABLE_SSH=1" >> config
+          echo "FIRST_USER_NAME=pi" >> config
+          echo "FIRST_USER_PASS=raspberry" >> config
+          echo "DISABLE_FIRST_BOOT_USER_RENAME=1" >> config
+          echo "DEBIAN_FRONTEND=noninteractive" >> config
+          echo "APT_LISTCHANGES_FRONTEND=none" >> config
+          echo "DEPLOY_COMPRESSION=xz" >> config
+          echo "COMPRESSION_LEVEL=6" >> config
+          echo "DEPLOY_ZIP=0" >> config
+          echo "USE_QEMU=1" >> config
+          echo "IMG_NAME=versanode-os" >> config
+          echo "DEPLOY_MINIMIZEFS=0" >> config
+          echo "ROOT_MARGIN=256" >> config
           case "${{ inputs.variant }}" in
             lite)   STAGES="stage0 stage1 stage2 export-image"; SIZE=4096 ;;
             normal) STAGES="stage0 stage1 stage2 stage3 stage4 export-image"; SIZE=6144 ;;
             full)   STAGES="stage0 stage1 stage2 stage3 stage4 stage5 export-image"; SIZE=8192 ;;
             *) echo "Unknown variant"; exit 1 ;;
           esac
-          echo "STAGE_LIST=\"${STAGES}\"" >> config.effective
-          echo "TARGET_IMAGE_SIZE=${SIZE}" >> config.effective
-          echo "---- EFFECTIVE CONFIG ----"
-          cat config.effective
+          echo "STAGE_LIST=\"${STAGES}\"" >> config
+          echo "TARGET_IMAGE_SIZE=${SIZE}" >> config
+          echo "---- CONFIG ----"
+          cat config
 
-      - name: Inject export-image precheck (guards ROOTFS/BOOTFS and sizing)
-        working-directory: pi-gen
+      - name: Make repo scripts executable
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p export-image/00-precheck
-          cat > export-image/00-precheck/00-run.sh <<'SH'
-          #!/bin/bash -eu
-          echo "[precheck] entering export-image precheck"
-          
-          : "${IMG_NAME:?IMG_NAME not set}"
-          : "${WORK_DIR:?WORK_DIR not set}"
-          : "${IMG_DATE:=$(date -u +%Y-%m-%d)}"
-          
-          BASE="${WORK_DIR}/${IMG_DATE}-${IMG_NAME}"
-          
-          # Find last stage with rootfs
-          LAST=""
-          LAST_STAGE=""
-          for s in stage5 stage4 stage3 stage2 stage1 stage0; do
-            if [ -d "${BASE}/${s}/rootfs" ]; then
-              LAST="${BASE}/${s}/rootfs"
-              LAST_STAGE="${s}"
-              break
-            fi
-          done
-          
-          if [ -z "${LAST}" ]; then
-            echo "[precheck] ERROR: no stage*/rootfs under ${BASE}" >&2
-            exit 94
-          fi
-          
-          # Export sane directories if unset
-          export ROOTFS_DIR="${ROOTFS_DIR:-${LAST}}"
-          if [ -d "${ROOTFS_DIR}/boot" ]; then
-            export BOOTFS_DIR="${BOOTFS_DIR:-${ROOTFS_DIR}/boot}"
-          fi
-          
-          # Provide export-image symlinks some scripts expect
-          mkdir -p "${BASE}/export-image"
-          [ -e "${BASE}/export-image/rootfs" ] || ln -s "${ROOTFS_DIR}" "${BASE}/export-image/rootfs"
-          if [ -n "${BOOTFS_DIR:-}" ]; then
-            [ -e "${BASE}/export-image/bootfs" ] || ln -s "${BOOTFS_DIR}" "${BASE}/export-image/bootfs"
-          fi
-          
-          # Guarantee a non-empty TARGET_IMAGE_SIZE
-          if [ -z "${TARGET_IMAGE_SIZE:-}" ]; then
-            export TARGET_IMAGE_SIZE=4096
-            echo "[precheck] TARGET_IMAGE_SIZE defaulted to 4096"
-          fi
-          
-          echo "[precheck] IMG_DATE=${IMG_DATE} IMG_NAME=${IMG_NAME}"
-          echo "[precheck] WORK_DIR=${WORK_DIR}"
-          echo "[precheck] LAST_STAGE=${LAST_STAGE}"
-          echo "[precheck] ROOTFS_DIR=${ROOTFS_DIR}"
-          echo "[precheck] BOOTFS_DIR=${BOOTFS_DIR:-<none>}"
-          echo "[precheck] TARGET_IMAGE_SIZE=${TARGET_IMAGE_SIZE}"
-          SH
-          chmod +x export-image/00-precheck/00-run.sh
-          echo "Injected export-image/00-precheck/00-run.sh"
+          chmod +x ./scripts/build.sh || true
+          chmod +x ./scripts/fetch_pi_gen.sh || true
+          # If you have any other helper scripts, chmod them here too.
 
-      - name: Build image with pi-gen (host ./build.sh)
-        working-directory: pi-gen
+      - name: Build image (via repo wrapper)
         shell: bash
         env:
           PI_GEN_DEBUG: "1"
         run: |
           set -euo pipefail
-          sudo CLEAN=1 ./build.sh -c ../config.effective
+          ./scripts/build.sh
 
       - name: Show deploy contents
         shell: bash
