@@ -17,6 +17,9 @@
 </p>
 
 
+<img src="docs/media/logo.png" alt="VersaNode OS construction" width="50%"/>
+
+
 Custom Raspberry Pi OS image builder powered by [pi-gen](https://github.com/RPi-Distro/pi-gen).  
 This repo produces a bootable `.img` (and `.img.xz`) you can flash to an SD card for Raspberry Pi devices.
 
