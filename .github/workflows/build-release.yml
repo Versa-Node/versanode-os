@@ -58,7 +58,7 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
           df -h
 
-      - name: Checkout this repo
+      - name: Checkout this repo (with submodules)
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
@@ -73,6 +73,19 @@ jobs:
             coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools e2fsprogs \
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
+
+      - name: Verify pi-gen submodule (should be arm64 branch)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d pi-gen ]; then
+            echo "ERROR: pi-gen submodule missing" >&2
+            exit 2
+          fi
+          echo "pi-gen commit: $(git -C pi-gen rev-parse --short HEAD)"
+          echo "pi-gen branch (if set): $(git -C pi-gen rev-parse --abbrev-ref HEAD || true)"
+          # List top-level to confirm presence of stages and build scripts
+          ls -la pi-gen | sed -n '1,80p'
 
       - name: Write config (used by scripts/build.sh)
         shell: bash
@@ -109,8 +122,7 @@ jobs:
         shell: bash
         run: |
           chmod +x ./scripts/build.sh || true
-          chmod +x ./scripts/fetch_pi_gen.sh || true
-          # If you have any other helper scripts, chmod them here too.
+          # fetch_pi_gen.sh no longer used (submodule only)
 
       - name: Build image (via repo wrapper)
         shell: bash
@@ -128,8 +140,16 @@ jobs:
           find . -maxdepth 3 -type d -name deploy -print || true
           echo
           echo "Searching for image artifacts…"
-          find . -type f \( -name '*.img' -o -name '*.img.xz' -o -name '*.bmap' \) -print || true
+          find . -type f \( -name '*.img' -o -name '*.img.xz' -o -name '*.bmap' -o -name '*.sha256' \) -print || true
 
+      - name: Fix permissions on deploy (if present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in $(find . -maxdepth 3 -type d -name deploy); do
+            echo "Fixing permissions in $d"
+            sudo chown -R "$USER":"$(id -gn)" "$d" || true
+          done
 
       - name: Upload artifacts (.img.xz)
         if: ${{ inputs.upload_artifacts }}
