@@ -65,4 +65,4 @@ echo
 # Run build
 cd "$PI_GEN_DIR"
 # -E preserves our env through sudo; pi-gen's docker wrapper passes env into the container
-sudo -E bash ./build.sh
+sudo -E bash ./build.sh -c "$CONFIG"
