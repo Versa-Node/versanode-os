@@ -10,7 +10,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PI_GEN_DIR="$ROOT/pi-gen"
 
 # 1) Ensure pi-gen is present (and cleanly reset to upstream)
-"$ROOT/scripts/fetch_pi_gen.sh"
+if [ ! -d "$PI_GEN_DIR" ] || [ -z "$(ls -A "$PI_GEN_DIR")" ]; then
+  "$ROOT/scripts/fetch_pi_gen.sh"
+else
+  echo ">> Using existing pi-gen submodule at $PI_GEN_DIR"
+fi
+
 
 # 2) Sync our custom stage into pi-gen (non-destructive, reproducible)
 rsync -a --delete "$ROOT/stages/stage1-kmods/" "$PI_GEN_DIR/stage1-kmods/"
