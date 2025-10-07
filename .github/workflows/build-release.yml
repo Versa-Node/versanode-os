@@ -84,7 +84,6 @@ jobs:
           fi
           echo "pi-gen commit: $(git -C pi-gen rev-parse --short HEAD)"
           echo "pi-gen branch (if set): $(git -C pi-gen rev-parse --abbrev-ref HEAD || true)"
-          # List top-level to confirm presence of stages and build scripts
           ls -la pi-gen | sed -n '1,80p'
 
       - name: Write config (used by scripts/build.sh)
@@ -122,7 +121,7 @@ jobs:
         shell: bash
         run: |
           chmod +x ./scripts/build.sh || true
-          # fetch_pi_gen.sh no longer used (submodule only)
+          # fetch_pi_gen.sh not used (submodule only)
 
       - name: Build image (via repo wrapper)
         shell: bash
@@ -132,34 +131,40 @@ jobs:
           set -euo pipefail
           ./scripts/build.sh
 
-      - name: Show deploy contents (search everywhere)
+      - name: Show deploy contents (sanity check)
         shell: bash
         run: |
           set -euo pipefail
-          echo "Searching for deploy directories (depth ≤ 3)…"
-          find . -maxdepth 3 -type d -name deploy -print || true
-          echo
-          echo "Searching for image artifacts…"
-          find . -type f \( -name '*.img' -o -name '*.img.xz' -o -name '*.bmap' -o -name '*.sha256' \) -print || true
+          if [ -d pi-gen/deploy ]; then
+            echo "pi-gen/deploy contents:"
+            ls -lah pi-gen/deploy
+          else
+            echo "WARNING: pi-gen/deploy not found"
+          fi
 
-      - name: Fix permissions on deploy (if present)
+      - name: Collect artifacts into ./artifacts
         shell: bash
         run: |
           set -euo pipefail
-          for d in $(find . -maxdepth 3 -type d -name deploy); do
-            echo "Fixing permissions in $d"
-            sudo chown -R "$USER":"$(id -gn)" "$d" || true
+          mkdir -p artifacts
+          shopt -s nullglob
+          for f in pi-gen/deploy/*.img.xz pi-gen/deploy/*.bmap pi-gen/deploy/*.sha256; do
+            [ -e "$f" ] || continue
+            cp -v "$f" artifacts/
           done
+          if [ -z "$(ls -A artifacts || true)" ]; then
+            echo "No artifacts found in pi-gen/deploy"; exit 1
+          fi
+          sudo chown -R "$USER":"$(id -gn)" artifacts
+          echo "Artifacts collected:"
+          ls -lah artifacts
 
       - name: Upload artifacts (.img.xz)
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}-${{ inputs.variant }}
-          path: |
-            **/deploy/*.img.xz
-            **/deploy/*.bmap
-            **/deploy/*.sha256
+          path: artifacts/*
           if-no-files-found: error
           compression-level: 9
 
@@ -171,10 +176,7 @@ jobs:
           draft: false
           prerelease: false
           tag_name: "build-${{ github.run_number }}"
-          files: |
-            **/deploy/*.img.xz
-            **/deploy/*.bmap
-            **/deploy/*.sha256
+          files: artifacts/*
           body: |
             Automated build of **versanode-os**
             - Release: ${{ inputs.release_codename }}
