@@ -120,22 +120,30 @@ jobs:
           set -euo pipefail
           ./scripts/build.sh
 
-      - name: Show deploy contents
+      - name: Show deploy contents (search everywhere)
         shell: bash
         run: |
-          echo "Contents of pi-gen/deploy:"
-          ls -lah pi-gen/deploy || true
+          set -euo pipefail
+          echo "Searching for deploy directories (depth ≤ 3)…"
+          find . -maxdepth 3 -type d -name deploy -print || true
+          echo
+          echo "Searching for image artifacts…"
+          find . -type f \( -name '*.img' -o -name '*.img.xz' -o -name '*.bmap' \) -print || true
+
 
       - name: Upload artifacts (.img.xz)
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}-${{ inputs.variant }}
-          path: pi-gen/deploy/*.img.xz
+          path: |
+            **/deploy/*.img.xz
+            **/deploy/*.bmap
+            **/deploy/*.sha256
           if-no-files-found: error
           compression-level: 9
 
-      - name: Create GitHub Release (attach .img.xz)
+      - name: Create GitHub Release (attach image)
         if: ${{ inputs.release }}
         uses: softprops/action-gh-release@v2
         with:
@@ -143,4 +151,13 @@ jobs:
           draft: false
           prerelease: false
           tag_name: "build-${{ github.run_number }}"
-          files: pi-gen/deploy/*.img.xz
+          files: |
+            **/deploy/*.img.xz
+            **/deploy/*.bmap
+            **/deploy/*.sha256
+          body: |
+            Automated build of **versanode-os**
+            - Release: ${{ inputs.release_codename }}
+            - Arch: ${{ inputs.arch }}
+            - Variant: ${{ inputs.variant }}
+            - Run: ${{ github.run_id }}
