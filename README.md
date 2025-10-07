@@ -24,6 +24,9 @@ This repo produces a bootable `.img` (and `.img.xz`) you can flash to an SD card
 > ✅ Includes a custom stage `stage1-kmods` where you can add kernel modules and tweaks.
 > ✅ Ships with a ready-to-use `config` so **anyone can build from scratch**.
 
+<img src="docs/media/construction.png" alt="VersaNode OS construction" width="100%"/>
+
+
 ---
 
 ## Table of Contents
