@@ -17,7 +17,7 @@
 </p>
 
 
-<img src="docs/media/logo.png" alt="VersaNode OS construction" width="50%"/>
+<img src="docs/media/logo-white.png" alt="VersaNode OS logo" width="50%"/>
 
 
 Custom Raspberry Pi OS image builder powered by [pi-gen](https://github.com/RPi-Distro/pi-gen).  
