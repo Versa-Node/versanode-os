@@ -74,7 +74,7 @@ jobs:
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
 
-      - name: Verify pi-gen submodule (should be arm64 branch)
+      - name: Verify pi-gen submodule (should be present)
         shell: bash
         run: |
           set -euo pipefail
@@ -84,17 +84,41 @@ jobs:
           fi
           echo "pi-gen commit: $(git -C pi-gen rev-parse --short HEAD)"
           echo "pi-gen branch (if set): $(git -C pi-gen rev-parse --abbrev-ref HEAD || true)"
-          ls -la pi-gen | sed -n '1,80p'
+          ls -la pi-gen | sed -n '1,120p'
+
+      - name: Verify custom repos exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -d versanode-os-kmods ] || { echo "Missing: versanode-os-kmods at repo root" >&2; exit 3; }
+          [ -d versanode-os-usermods ] || { echo "Missing: versanode-os-usermods at repo root" >&2; exit 3; }
+          echo "versanode-os-kmods @ $(git -C versanode-os-kmods rev-parse --short HEAD || echo 'not a git repo')"
+          echo "versanode-os-usermods @ $(git -C versanode-os-usermods rev-parse --short HEAD || echo 'not a git repo')"
+
+      - name: Prepare custom stages (copy into pi-gen)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf pi-gen/stage2-kmods pi-gen/stage9-usermods
+          cp -a versanode-os-kmods    pi-gen/stage2-kmods
+          cp -a versanode-os-usermods pi-gen/stage9-usermods
+          echo "---- pi-gen top-level after copy ----"
+          ls -la pi-gen | sed -n '1,200p'
+          echo "---- stage2-kmods layout ----"
+          find pi-gen/stage2-kmods -maxdepth 2 -type f | sed -n '1,80p'
+          echo "---- stage9-usermods layout ----"
+          find pi-gen/stage9-usermods -maxdepth 2 -type f | sed -n '1,80p'
 
       - name: Write config (used by scripts/build.sh)
         shell: bash
         run: |
           set -euo pipefail
           : > config
-          echo "ARCH=arm64" >> config
+          echo "ARCH=${{ inputs.arch }}" >> config
           echo "RELEASE=${{ inputs.release_codename }}" >> config
-          echo "PUBKEY_ONLY_SSH=0" >> config
+          echo "IMG_NAME=versanode-os" >> config
           echo "ENABLE_SSH=1" >> config
+          echo "PUBKEY_ONLY_SSH=0" >> config
           echo "FIRST_USER_NAME=versanode" >> config
           echo "FIRST_USER_PASS=versanode" >> config
           echo "DISABLE_FIRST_BOOT_USER_RENAME=1" >> config
@@ -104,15 +128,28 @@ jobs:
           echo "COMPRESSION_LEVEL=6" >> config
           echo "DEPLOY_ZIP=0" >> config
           echo "USE_QEMU=1" >> config
-          echo "IMG_NAME=versanode-os" >> config
           echo "DEPLOY_MINIMIZEFS=0" >> config
           echo "ROOT_MARGIN=256" >> config
+
           case "${{ inputs.variant }}" in
-            lite)   STAGES="stage0 stage1 stage2 export-image"; SIZE=4096 ;;
-            normal) STAGES="stage0 stage1 stage2 stage3 stage4 export-image"; SIZE=6144 ;;
-            full)   STAGES="stage0 stage1 stage2 stage3 stage4 stage5 export-image"; SIZE=8192 ;;
-            *) echo "Unknown variant"; exit 1 ;;
+            lite)
+              STAGES="stage0 stage1 stage2 stage2-kmods stage9-usermods export-image"
+              SIZE=4096
+              ;;
+            normal)
+              STAGES="stage0 stage1 stage2 stage2-kmods stage3 stage4 stage9-usermods export-image"
+              SIZE=6144
+              ;;
+            full)
+              STAGES="stage0 stage1 stage2 stage2-kmods stage3 stage4 stage5 stage9-usermods export-image"
+              SIZE=8192
+              ;;
+            *)
+              echo "Unknown variant: ${{ inputs.variant }}" >&2
+              exit 1
+              ;;
           esac
+
           echo "STAGE_LIST=\"${STAGES}\"" >> config
           echo "TARGET_IMAGE_SIZE=${SIZE}" >> config
           echo "---- CONFIG ----"
@@ -122,7 +159,6 @@ jobs:
         shell: bash
         run: |
           chmod +x ./scripts/build.sh || true
-          # fetch_pi_gen.sh not used (submodule only)
 
       - name: Build image (via repo wrapper)
         shell: bash
