@@ -93,9 +93,10 @@ jobs:
           : > config
           echo "ARCH=arm64" >> config
           echo "RELEASE=${{ inputs.release_codename }}" >> config
+          echo "PUBKEY_ONLY_SSH=0" >> config
           echo "ENABLE_SSH=1" >> config
-          echo "FIRST_USER_NAME=pi" >> config
-          echo "FIRST_USER_PASS=raspberry" >> config
+          echo "FIRST_USER_NAME=versanode" >> config
+          echo "FIRST_USER_PASS=versanode" >> config
           echo "DISABLE_FIRST_BOOT_USER_RENAME=1" >> config
           echo "DEBIAN_FRONTEND=noninteractive" >> config
           echo "APT_LISTCHANGES_FRONTEND=none" >> config
