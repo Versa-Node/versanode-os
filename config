@@ -8,4 +8,3 @@ FIRST_USER_PASS=versanode
 DISABLE_FIRST_BOOT_USER_RENAME=1
 DEBIAN_FRONTEND=noninteractive
 APT_LISTCHANGES_FRONTEND=none
-STAGE_LIST="stage0 stage1 stage1-kmods stage2 stage3 stage4 stage5 export-image"

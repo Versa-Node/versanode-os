@@ -43,7 +43,7 @@ for s in stage9 stage5 stage4 stage3 stage2 stage1; do
   fi
 done
 
-export EXPORT_ROOTFS_DIR="/pi-gen/work/${IMG_DATE}-${IMG_NAME}/${HIGHEST_STAGE}/rootfs"
+#export export EXPORT_ROOTFS_DIR="/pi-gen/work/${IMG_NAME}/${HIGHEST_STAGE}/rootfs"
 
 echo ">> Building VersaNode OS..."
 echo "   IMG_NAME=$IMG_NAME"
