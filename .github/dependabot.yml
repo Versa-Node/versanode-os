@@ -1,7 +1,22 @@
 version: 2
 updates:
+  # Keep GitHub Actions up-to-date (you already had this)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+
+  # 🔁 Bump git submodules (e.g., versanode-os-kmods, versanode-os-usermods)
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"            # Must be repo root for submodules
+    schedule:
+      interval: "daily"       # or "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(submodule)"
+    labels:
+      - "dependencies"
+      - "submodule"
+    # Optional: auto-assign reviewers
+    # reviewers: ["Habibi"]
