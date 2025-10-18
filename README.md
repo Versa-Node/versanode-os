@@ -29,9 +29,10 @@ Lite gives you the smallest image and fastest boot while still including all Ver
 
 ## 🧩 Build Flow (pi-gen)
 
-VersaNode OS is built with Raspberry Pi’s **pi-gen**, plus two injected, project-specific stages:
+VersaNode OS is built with [`Raspberry Pi’s pi-gen `](https://github.com/RPi-Distro/pi-gen), plus two injected, project-specific stages:
 
 ```mermaid
+%%{init: {"theme": "default", "themeVariables": { "fontSize": "10px", "fontFamily": "Arial", "lineHeight": "1", "nodeSpacing": "10", "rankSpacing": "10"}}}%%
 flowchart TD
     A["pi-gen Generator"] --> B["Official pi-gen Stages (stage0 → stage2)"]
     B --> C["Injected Stage: versanode-os-kmods (stage2-kmods)"]
