@@ -6,3 +6,7 @@
 	path = versanode-os-kmods
 	url = https://github.com/Versa-Node/versanode-os-kmods
 	branch = main
+[submodule "versanode-os-usermods"]
+	path = versanode-os-usermods
+	url = https://github.com/Versa-Node/versanode-os-usermods
+	branch = main
