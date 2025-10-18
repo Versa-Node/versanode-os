@@ -16,66 +16,126 @@
   </a>
 </p>
 
-
 <img src="docs/media/logo-white.png" alt="VersaNode OS logo" width="50%"/>
-
-
-# VersaNode OS Build Process (pi-gen Workflow)
-
-This document explains how the **VersaNode OS** image is built using the Raspberry Pi **pi-gen** build system,
-extended with two custom injected stages: **versanode-os-kmods** and **versanode-os-usermods**.
 
 ---
 
-## 🧩 Build Flow Overview
+## 🚀 Recommended Image
+
+**VersaNode recommends the _Lite_ variant** for most users and devices.  
+Lite gives you the smallest image and fastest boot while still including all VersaNode features added by the custom stages.
+
+---
+
+## 🧩 Build Flow (pi-gen)
+
+VersaNode OS is built with Raspberry Pi’s **pi-gen**, plus two injected, project-specific stages:
 
 ```mermaid
 flowchart TD
     A["pi-gen Generator"] --> B["Official pi-gen Stages (stage0 → stage2)"]
     B --> C["Injected Stage: versanode-os-kmods (stage2-kmods)"]
-    C --> D["Continue pi-gen Stages (stage3 → stage5)"]
+    C --> D["Optional pi-gen Stages (stage3 → stage5)"]
     D --> E["Injected Final Stage: versanode-os-usermods (stage9-usermods)"]
     E --> F["Output: VersaNode OS Image (.img)"]
 ```
 
+### Stages
+
+| Stage | What it does |
+|------:|--------------|
+| **stage0–2** | Base Raspberry Pi OS, firmware, kernel, and core setup. |
+| **stage2-kmods** | **Injected** — builds/installs VersaNode-specific kernel modules. |
+| **stage3–5** | Optional pi-gen stages (desktop and extra packages when enabled). |
+| **stage9-usermods** | **Injected** — installs Cockpit, configures Nginx/TLS & reverse-proxy, removes unused stacks, and adds VersaNode tooling. |
+| **export-image** | Produces the final compressed `.img.xz` ready to flash. |
+
+### Variants and their stage lists
+
+- **Lite (recommended)**  
+  `stage0 stage1 stage2 stage2-kmods stage9-usermods export-image`
+
+- **Normal**  
+  `stage0 stage1 stage2 stage2-kmods stage3 stage4 stage9-usermods export-image`
+
+- **Full**  
+  `stage0 stage1 stage2 stage2-kmods stage3 stage4 stage5 stage9-usermods export-image`
+
+> The _Normal_ and _Full_ variants include additional official pi-gen stages for desktop/extras.  
+> The _Lite_ variant skips those to keep the image lean.
+
 ---
 
-## 🧱 Stage Descriptions
+## 🔗 Submodules & Auto-Update
 
-| Stage | Description |
-|--------|--------------|
-| **stage0–2** | Core Raspberry Pi OS base, firmware, and kernel setup. |
-| **stage2-kmods** | Injected stage that builds and installs VersaNode-specific kernel modules. |
-| **stage3–5** | Optional official stages that add additional system features, desktop packages, and extras. |
-| **stage9-usermods** | Injected final stage that installs Cockpit, removes unused packages, and adds VersaNode VNC Manager. |
-| **export-image** | Produces the final compressed VersaNode OS `.img` file ready for flashing. |
+This repository uses two **Git submodules**:
 
----
+- [`versanode-os-kmods`](https://github.com/Versa-Node/versanode-os-kmods) → injected as **`stage2-kmods`**
+- [`versanode-os-usermods`](https://github.com/Versa-Node/versanode-os-usermods) → injected as **`stage9-usermods`**
 
-## ⚙️ Automation Overview
+Each submodule repository includes an **automation workflow** that, on every push, updates the submodule pointer in this parent repository (**`versanode-os`**) either by **pushing directly** or by **opening a PR** (depending on the chosen mode).  
+That means when you change either submodule, **`versanode-os` updates almost immediately**, and downstream build workflows can run right away.
 
-The **GitHub Actions workflow** (`.github/workflows/build.yml`) does the following:
-
-1. Checks out this repository and its submodules (`pi-gen`, `versanode-os-kmods`, `versanode-os-usermods`).
-2. Copies the custom stages into `pi-gen/` as `stage2-kmods` and `stage9-usermods`.
-3. Generates a configuration file defining which stages to build.
-4. Runs the pi-gen build process inside the runner.
-5. Collects and uploads the generated `.img.xz` artifacts.
-6. Optionally publishes a GitHub Release containing the built image.
+> Tip: Use a fine‑grained PAT with `contents:write` on `Versa-Node/versanode-os` to allow the child repos to push or raise PRs here safely.
 
 ---
 
-## 📦 Output
+## ⚙️ Build Workflow Behavior
 
-The final result is a bootable **VersaNode OS image** containing:
-- Custom kernel modules (from `versanode-os-kmods`)
-- Cockpit-based management interface and tools (from `versanode-os-usermods`)
-- Full Raspberry Pi OS core base (pi-gen official stages)
+The GitHub Actions workflow (Build & Release) ihas to be triggered manually, and does the following:
 
-Resulting image filename pattern:
-```
-versanode-os-<release>-<arch>-<variant>.img.xz
-```
+1. **Checks out** this repository **and its submodules** (`pi-gen`, `versanode-os-kmods`, `versanode-os-usermods`).  
+2. **Injects** the submodule folders into `pi-gen/` as `stage2-kmods` and `stage9-usermods`.  
+3. **Generates the `pi-gen/config` file in CI** based on the workflow inputs (release/arch/variant).  
+   - **Note:** the build **does not** load `config` from the repo root; it **generates** one inside CI for the selected variant to avoid drift.  
+4. Runs the **pi-gen** build.  
+5. **Uploads artifacts** (`.img.xz`, `.bmap`, `.sha256`).  
+6. Optionally **publishes a GitHub Release** with the image.
+
+---
+
+## 📦 VersaNode OS Images & Flashing
+[`Official VersaNode OS images`](https://github.com/Versa-Node/versanode-os/releases) are maintaned from this repository. If you have to flash the hardware you may find the released `.img.xz` from here.
+
+Example: `versanode-os-<release>-<arch>-<variant>.img.xz`
+
+---
+
+You may use the Official Raspberry Pi Imager, the VersaNode boot button has to be held during its power-on cycle first to allow flashing via usb, and the emmc has to be mounted as a mass storage device using the .[`RPI USB Boot`](https://github.com/raspberrypi/usbboot) 
+
+---
+
+## 🔐 Default Credentials
+
+After flashing the VersaNode OS image, the system will boot with the following defaults if you have not modified them using the imager:
+
+| Setting | Default Value |
+|----------|----------------|
+| **Hostname** | `versanode` |
+| **Username** | `versanode` |
+| **Password** | `versanode` |
+
+You can access the VersaNode's Cockpit dashboard by visiting:
+
+👉 **https://versanode** → redirects to **https://versanode/cockpit/**
+
+> 🛡️ On first boot, local TLS certificates are automatically generated and applied by nginx-lite.  
+> If the hostname is changed later, the certificates will be seamlessly reissued.
+
+---
+
+## 🧭 VersaNode Cockpit, VNCP Manager & Proxying
+
+VersaNode OS ships with a streamlined **nginx-lite** reverse proxy, a preconfigured **VersaNode Cockpit dashboard**, and the **VNCP Manager** plugin for managing containerized VersaNode applications.
+
+### ✅ Quick Expectations
+
+- **Visit:** `https://<hostname>` — this automatically directs you to the **VersaNode Cockpit** web interface.
+- All reverse proxying is handled by **nginx-lite**, including HTTPS termination using **locally generated TLS certificates**.  
+- Certificates are issued and renewed automatically using a **local Certificate Authority (CA)**, and seamlessly reissued if the hostname changes.  
+- The **VNCP containers** are automatically scanned for custom nginx server blocks, which are dynamically added to the proxy configuration.  
+- The **[VersaNode Cockpit VNCP Manager](https://github.com/Versa-Node/cockpit-vncp-manager)** plugin is preinstalled, allowing management of VersaNode container applications directly from the Cockpit UI.  
+- All Cockpit, proxy, and plugin configurations are provisioned during the **`stage9-usermods`** build stage.  
 
 ---
 

@@ -99,6 +99,7 @@ jobs:
           PUBKEY_ONLY_SSH=0
           FIRST_USER_NAME=versanode
           FIRST_USER_PASS=versanode
+          TARGET_HOSTNAME=versanode
           DISABLE_FIRST_BOOT_USER_RENAME=1
           DEBIAN_FRONTEND=noninteractive
           DEPLOY_COMPRESSION=xz
