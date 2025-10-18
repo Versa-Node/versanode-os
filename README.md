@@ -29,7 +29,7 @@ Lite gives you the smallest image and fastest boot while still including all Ver
 
 ## 🧩 Build Flow (pi-gen)
 
-VersaNode OS is built with [`Raspberry Pi’s pi-gen `](https://github.com/RPi-Distro/pi-gen), plus two injected, project-specific stages:
+VersaNode OS is built with [`Raspberry Pi’s pi-gen `](https://github.com/RPi-Distro/pi-gen), with VersaNode' kernel- and user-level modifications injected as build stages:
 
 ```mermaid
 %%{init: {"theme": "default", "themeVariables": { "fontSize": "10px", "fontFamily": "Arial", "lineHeight": "1", "nodeSpacing": "10", "rankSpacing": "10"}}}%%
@@ -42,13 +42,14 @@ flowchart TD
 ```
 
 ### Stages
+The default VersNode OS is built with the headles / lite configuration. Extended by VersaNode's custom kernel modifications (kernel-level hardware modifications) and user modifications (user-level services.)
 
 | Stage | What it does |
 |------:|--------------|
 | **stage0–2** | Base Raspberry Pi OS, firmware, kernel, and core setup. |
-| **stage2-kmods** | **Injected** — builds/installs VersaNode-specific kernel modules. |
-| **stage3–5** | Optional pi-gen stages (desktop and extra packages when enabled). |
-| **stage9-usermods** | **Injected** — installs Cockpit, configures Nginx/TLS & reverse-proxy, removes unused stacks, and adds VersaNode tooling. |
+| **stage2-kmods** | **Copied from submodule import** — builds/installs VersaNode-specific kernel modules. |
+| **stage3–5** | Not used in default VersaNode OS image, they are pi-gen stages for desktop and extra packages when enabled. |
+| **stage9-usermods** | **Copied from submodule import** — installs Cockpit, configures Nginx/TLS & reverse-proxy, removes unused stacks, and adds VersaNode tooling. |
 | **export-image** | Produces the final compressed `.img.xz` ready to flash. |
 
 ### Variants and their stage lists
