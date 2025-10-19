@@ -35,9 +35,9 @@ VersaNode OS is built with [`Raspberry Pi’s pi-gen `](https://github.com/RPi-D
 %%{init: {"theme": "default", "themeVariables": { "fontSize": "10px", "fontFamily": "Arial", "lineHeight": "1", "nodeSpacing": "10", "rankSpacing": "10"}}}%%
 flowchart TD
     A["pi-gen Generator"] --> B["Official pi-gen Stages (stage0 → stage2)"]
-    B --> C["Injected Stage: versanode-os-kmods (stage2-kmods)"]
+    B --> C["Injected Stage: versanode-os-kmods (stage8)"]
     C --> D["Optional pi-gen Stages (stage3 → stage5)"]
-    D --> E["Injected Final Stage: versanode-os-usermods (stage9-usermods)"]
+    D --> E["Injected Final Stage: versanode-os-usermods (stage9)"]
     E --> F["Output: VersaNode OS Image (.img)"]
 ```
 
@@ -47,21 +47,15 @@ The default VersNode OS is built with the headles / lite configuration. Extended
 | Stage | What it does |
 |------:|--------------|
 | **stage0–2** | Base Raspberry Pi OS, firmware, kernel, and core setup. |
-| **stage2-kmods** | **Copied from submodule import** — builds/installs VersaNode-specific kernel modules. |
-| **stage3–5** | Not used in default VersaNode OS image, they are pi-gen stages for desktop and extra packages when enabled. |
-| **stage9-usermods** | **Copied from submodule import** — installs Cockpit, configures Nginx/TLS & reverse-proxy, removes unused stacks, and adds VersaNode tooling. |
+| **~~stage3–5~~** | ~~=Stages for desktop and extra packages.~~ |
+| **stage8** | **Copied from kmods submodule** — builds/installs VersaNode-specific kernel modules. |
+| **stage9** | **Copied from usermods submodule** — installs Cockpit, configures Nginx/TLS & reverse-proxy, removes unused stacks, and adds VersaNode tooling. |
 | **export-image** | Produces the final compressed `.img.xz` ready to flash. |
 
 ### Variants and their stage lists
 
-- **Lite (recommended)**  
-  `stage0 stage1 stage2 stage2-kmods stage9-usermods export-image`
-
-- **Normal**  
-  `stage0 stage1 stage2 stage2-kmods stage3 stage4 stage9-usermods export-image`
-
-- **Full**  
-  `stage0 stage1 stage2 stage2-kmods stage3 stage4 stage5 stage9-usermods export-image`
+- **Default**  
+  `stage0 stage1 stage2 stage8 stage9 export-image`
 
 > The _Normal_ and _Full_ variants include additional official pi-gen stages for desktop/extras.  
 > The _Lite_ variant skips those to keep the image lean.

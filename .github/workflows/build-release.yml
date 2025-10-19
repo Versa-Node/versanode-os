@@ -38,14 +38,6 @@ jobs:
           docker-images: true
           swap-storage: false
 
-      - name: 🧽 Extra prune & show free space
-        run: |
-          docker system prune -af || true
-          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /opt/hostedtoolcache || true
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-          df -h
-
       - name: 📦 Checkout repo with submodules
         uses: actions/checkout@v4
         with:
@@ -69,28 +61,64 @@ jobs:
           [ -d versanode-os-usermods ] || { echo "versanode-os-usermods missing"; exit 4; }
           [ -f config ] || { echo "root-level config missing"; exit 5; }
           echo "✅ pi-gen, kmods, usermods, and root config present."
+          echo "---- config preview ----"
+          sed -n '1,200p' config
 
       - name: 🧩 Inject custom stages into pi-gen
         run: |
           set -euo pipefail
-          rm -rf pi-gen/stage2-kmods pi-gen/stage9-usermods
-          cp -a versanode-os-kmods    pi-gen/stage2-kmods
-          cp -a versanode-os-usermods pi-gen/stage9-usermods
-          echo "✅ Injected versanode-os-kmods -> stage2-kmods"
-          echo "✅ Injected versanode-os-usermods -> stage9-usermods"
+          rm -rf pi-gen/stage8 pi-gen/stage9
+          cp -a versanode-os-kmods    pi-gen/stage8
+          cp -a versanode-os-usermods pi-gen/stage9
+          echo "✅ Injected versanode-os-kmods -> stage8"
+          echo "✅ Injected versanode-os-usermods -> stage9"
 
-          # Prevent early exports from stock stages (export only at the end)
+          # Prevent early exports from stock stages (export only once at the end)
           touch pi-gen/stage2/SKIP_IMAGES || true
           touch pi-gen/stage4/SKIP_IMAGES || true
           touch pi-gen/stage5/SKIP_IMAGES || true
 
-          # Ensure final export happens from stage9-usermods
-          cat > pi-gen/stage9-usermods/EXPORT_IMAGE <<'EOF'
+          # Export after our final custom stage (stage9)
+          cat > pi-gen/stage9/EXPORT_IMAGE <<'EOF'
           IMG_SUFFIX=""
           if [ "${USE_QEMU}" = "1" ]; then
             IMG_SUFFIX="${IMG_SUFFIX}-qemu"
           fi
           EOF
+
+      - name: 🛠️ Normalize line endings & ensure exec bits (stage8 & stage9)
+        run: |
+          set -euo pipefail
+          for s in stage8 stage9; do
+            d="pi-gen/$s"
+            [ -d "$d" ] || { echo "Missing $d"; exit 6; }
+
+            # Fix CRLF on all shell scripts we care about
+            find "$d" -type f \( -name 'prerun.sh' -o -name '*-run.sh' -o -name '*-run-chroot.sh' \) \
+              -exec sed -i 's/\r$//' {} \;
+
+            # Ensure executables
+            [ -f "$d/prerun.sh" ] && chmod +x "$d/prerun.sh" || true
+            find "$d" -maxdepth 2 -type f -name '*-run.sh' -exec chmod +x {} \;
+            find "$d" -maxdepth 2 -type f -name '*-run-chroot.sh' -exec chmod +x {} \;
+
+            echo "---- $s directory listing ----"
+            ls -l "$d" || true
+            echo "---- $s/prerun.sh head ----"
+            if [ -f "$d/prerun.sh" ]; then head -n 20 "$d/prerun.sh"; else echo "no prerun.sh"; fi
+
+            echo "---- $s/*-run*.sh heads ----"
+            for f in $(find "$d" -maxdepth 2 -type f -name '*-run*.sh' | sort); do
+              echo "## $f"; head -n 10 "$f"; echo
+            done
+          done
+
+      - name: 🧾 Show STAGE_LIST from config (sanity)
+        run: |
+          set -euo pipefail
+          echo "Configured STAGE_LIST (if present):"
+          grep -E '^\s*STAGE_LIST=' config || true
+          echo "NOTE: It must include 'stage8 stage9 export-image' in the desired order."
 
       - name: 🏗️ Run pi-gen build (load config from repo root)
         env:
