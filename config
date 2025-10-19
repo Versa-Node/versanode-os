@@ -1,11 +1,20 @@
+# repo-root/config
 IMG_NAME=versanode-os
-RELEASE=bookworm
+RELEASE=trixie
 ARCH=arm64
+
 ENABLE_SSH=1
 PUBKEY_ONLY_SSH=0
 FIRST_USER_NAME=versanode
 FIRST_USER_PASS=versanode
 TARGET_HOSTNAME=versanode
 DISABLE_FIRST_BOOT_USER_RENAME=1
+
 DEBIAN_FRONTEND=noninteractive
 APT_LISTCHANGES_FRONTEND=none
+
+STAGE_LIST="stage0 stage1 stage2 stage2-kmods stage9-usermods export-image"
+
+USE_QEMU=1
+DEPLOY_COMPRESSION=xz
+COMPRESSION_LEVEL=6
