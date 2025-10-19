@@ -14,8 +14,8 @@ categories:
 change-template: "- $TITLE (#$NUMBER) by @$AUTHOR"
 no-changes-template: "No significant changes."
 template: |
-  ## Changes
+  ## What's new?
   $CHANGES
 
-  ## Thanks
+  ## Credits to you
   $CONTRIBUTORS
