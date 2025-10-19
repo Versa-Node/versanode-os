@@ -15,6 +15,18 @@ on:
         description: "Upload build artifacts?"
         type: boolean
         default: true
+      arch:
+        description: "Architecture (arm64 only here)"
+        default: "arm64"
+        required: true
+      release_codename:
+        description: "Raspberry Pi OS release (bookworm or trixie)"
+        default: "trixie"
+        required: true
+      variant:
+        description: "Image size (lite|normal|full)"
+        default: "lite"
+        required: true
 
 concurrency:
   group: versanode-os-${{ github.workflow }}-${{ github.ref }}
@@ -61,6 +73,155 @@ jobs:
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
 
+      - name: 🔍 Verify pi-gen and custom modules
+        run: |
+          set -euo pipefail
+          [ -d pi-gen ] || { echo "pi-gen missing"; exit 2; }
+          [ -d versanode-os-kmods ] || { echo "versanode-os-kmods missing"; exit 3; }
+          [ -d versanode-os-usermods ] || { echo "versanode-os-usermods missing"; exit 4; }
+          echo "✅ All submodules present."
+
+      - name: 🧩 Inject custom stages into pi-gen
+        run: |
+          rm -rf pi-gen/stage2-kmods pi-gen/stage9-usermods
+          cp -a versanode-os-kmods    pi-gen/stage2-kmods
+          cp -a versanode-os-usermods pi-gen/stage9-usermods
+          echo "✅ Injected versanode-os-kmods -> stage2-kmods"
+          echo "✅ Injected versanode-os-usermods -> stage9-usermods"
+
+      - name: 📝 Write config for pi-gen
+        run: |
+          cat <<EOF > config
+          ARCH=${{ inputs.arch }}
+          RELEASE=${{ inputs.release_codename }}
+          IMG_NAME=versanode-os
+          ENABLE_SSH=1
+          PUBKEY_ONLY_SSH=0
+          FIRST_USER_NAME=versanode
+          FIRST_USER_PASS=versanode
+          TARGET_HOSTNAME=versanode
+          DISABLE_FIRST_BOOT_USER_RENAME=1
+          DEBIAN_FRONTEND=noninteractive
+          DEPLOY_COMPRESSION=xz
+          COMPRESSION_LEVEL=6
+          USE_QEMU=1
+          DEPLOY_MINIMIZEFS=0
+          ROOT_MARGIN=256
+          EOF
+
+          case "${{ inputs.variant }}" in
+            lite)
+              echo 'STAGE_LIST="stage0 stage1 stage2 stage2-kmods stage9-usermods export-image"' >> config
+              echo 'TARGET_IMAGE_SIZE=4096' >> config
+              ;;
+            normal)
+              echo 'STAGE_LIST="stage0 stage1 stage2 stage2-kmods stage3 stage4 stage9-usermods export-image"' >> config
+              echo 'TARGET_IMAGE_SIZE=6144' >> config
+              ;;
+            full)
+              echo 'STAGE_LIST="stage0 stage1 stage2 stage2-kmods stage3 stage4 stage5 stage9-usermods export-image"' >> config
+              echo 'TARGET_IMAGE_SIZE=8192' >> config
+              ;;
+          esac
+
+      - name: 🔧 Make scripts executable
+        run: chmod +x ./scripts/build.sh || true
+
+      - name: 🏗️ Run pi-gen build
+        env:
+          PI_GEN_DEBUG: "1"
+        run: ./scripts/build.sh
+
+      - name: 📂 Collect build artifacts
+        run: |
+          mkdir -p artifacts
+          cp -v pi-gen/deploy/*.{img.xz,bmap,sha256} artifacts/ || true
+          ls -lh artifacts
+
+      - name: ⬆️ Upload artifacts
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: versanode-os-${{ inputs.release_codename }}-${{ inputs.arch }}-${{ inputs.variant }}
+          path: artifacts/*
+
+      - name: 🚀 Create GitHub Release
+        if: ${{ inputs.release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "VersaNode OS (${{ inputs.arch }}) — ${{ inputs.variant }}"
+          tag_name: "build-${{ github.run_number }}"
+          files: artifacts/*
+          body: |
+            Automated build of **VersaNode OS**
+            - Release: ${{ inputs.release_codename }}
+            - Arch: ${{ inputs.arch }}
+            - Variant: ${{ inputs.variant }}
+            - Run ID: ${{ github.run_id }}
+name: VersaNode OS Build & Release (pi-gen)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch or tag)"
+        default: "main"
+        required: true
+      release:
+        description: "Publish GitHub Release?"
+        type: boolean
+        default: true
+      upload_artifacts:
+        description: "Upload build artifacts?"
+        type: boolean
+        default: true
+
+concurrency:
+  group: versanode-os-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 🧹 Free up disk space (optimized)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: false        # slow, minimal benefit
+          dotnet: true
+          haskell: false        # very slow, not needed
+          large-packages: false # speeds up, not critical
+          docker-images: true
+          swap-storage: false   # skip disabling swap (safe & fast)
+
+
+      - name: 🧽 Extra prune & show free space
+        run: |
+          docker system prune -af || true
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /opt/hostedtoolcache || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: 📦 Checkout repo with submodules
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: ⚙️ Install pi-gen host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools e2fsprogs \
+            libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
+            kpartx kmod arch-test ca-certificates
+
       - name: 🔍 Verify submodules and config
         run: |
           set -euo pipefail
@@ -75,8 +236,21 @@ jobs:
           rm -rf pi-gen/stage2-kmods pi-gen/stage9-usermods
           cp -a versanode-os-kmods    pi-gen/stage2-kmods
           cp -a versanode-os-usermods pi-gen/stage9-usermods
-          echo "✅ Injected versanode-os-kmods -> stage2-kmods"
-          echo "✅ Injected versanode-os-usermods -> stage9-usermods"
+
+          # prevent early exports
+          touch pi-gen/stage2/SKIP_IMAGES || true
+          touch pi-gen/stage4/SKIP_IMAGES || true
+          touch pi-gen/stage5/SKIP_IMAGES || true
+
+          # ensure final export happens from stage9-usermods
+          cat > pi-gen/stage9-usermods/EXPORT_IMAGE <<'EOF'
+          IMG_SUFFIX=""
+          if [ "${USE_QEMU}" = "1" ]; then
+            IMG_SUFFIX="${IMG_SUFFIX}-qemu"
+          fi
+          EOF
+
+          echo "✅ Custom stages injected and configured."
 
       - name: 🔧 Make stage scripts executable
         run: |
