@@ -1,4 +1,3 @@
-# repo-root/config
 IMG_NAME=versanode-os
 RELEASE=trixie
 ARCH=arm64

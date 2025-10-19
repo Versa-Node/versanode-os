@@ -67,13 +67,15 @@ jobs:
           [ -d pi-gen ] || { echo "pi-gen missing"; exit 2; }
           [ -d versanode-os-kmods ] || { echo "versanode-os-kmods missing"; exit 3; }
           [ -d versanode-os-usermods ] || { echo "versanode-os-usermods missing"; exit 4; }
-          echo "✅ pi-gen, kmods, usermods present."
-          if [ -f config ]; then
-            echo "---- repo-root config (preview) ----"
-            sed -n '1,200p' config
-          else
-            echo "ℹ️ repo-root config not found; will synthesize config.ci"
+
+          if [ ! -f config ]; then
+            echo "::error::Missing root config file! You must include a config at repo root."
+            exit 5
           fi
+
+          echo "✅ pi-gen, kmods, usermods, and config found."
+          echo "---- Root config preview ----"
+          sed -n '1,40p' config
 
       - name: 🧩 Inject custom stages into pi-gen
         run: |
@@ -81,18 +83,9 @@ jobs:
           rm -rf pi-gen/stage8 pi-gen/stage9
           cp -a versanode-os-kmods    pi-gen/stage8
           cp -a versanode-os-usermods pi-gen/stage9
-          echo "✅ Injected versanode-os-kmods -> stage8"
-          echo "✅ Injected versanode-os-usermods -> stage9"
+          echo "✅ Injected custom stages"
 
-          # Prevent early exports from stock stages (export only once at the end)
-          touch pi-gen/stage3/SKIP || true
-          touch pi-gen/stage4/SKIP || true
-          touch pi-gen/stage5/SKIP || true
-          touch pi-gen/stage2/SKIP_IMAGES || true
-          touch pi-gen/stage4/SKIP_IMAGES || true
-          touch pi-gen/stage5/SKIP_IMAGES || true
-
-          # Ensure final export happens after our custom stage9
+          # Ensure export only happens once (final image from stage9)
           cat > pi-gen/stage9/EXPORT_IMAGE <<'EOF'
           IMG_SUFFIX=""
           if [ "${USE_QEMU}" = "1" ]; then
@@ -100,82 +93,26 @@ jobs:
           fi
           EOF
 
-      - name: 🛠️ Normalize line endings & ensure exec bits (stage8 & stage9)
+      - name: 🛠️ Normalize line endings & permissions
         run: |
           set -euo pipefail
           for s in stage8 stage9; do
             d="pi-gen/$s"
-            [ -d "$d" ] || { echo "Missing $d"; exit 6; }
-
-            # Fix CRLF on shell scripts
-            find "$d" -type f \( -name 'prerun.sh' -o -name '*-run.sh' -o -name '*-run-chroot.sh' \) \
-              -exec sed -i 's/\r$//' {} \;
-
-            # Ensure executables
-            [ -f "$d/prerun.sh" ] && chmod +x "$d/prerun.sh" || true
-            find "$d" -maxdepth 2 -type f -name '*-run.sh' -exec chmod +x {} \;
-            find "$d" -maxdepth 2 -type f -name '*-run-chroot.sh' -exec chmod +x {} \;
-
-            echo "---- $s directory listing ----"
-            ls -l "$d" || true
+            find "$d" -type f -name '*.sh' -exec sed -i 's/\r$//' {} \;
+            find "$d" -type f -name '*.sh' -exec chmod +x {} \;
+            echo "✅ normalized scripts in $s"
           done
 
-      - name: 🧾 Prepare pi-gen/config (source of truth)
+      - name: 🧾 Copy config file into pi-gen
         run: |
           set -euo pipefail
-
-          if [ -f config ]; then
-            echo "Using repo-root ./config"
-            CONFIG_SRC=config
-          else
-            echo "Synthesizing config.ci with VersaNode defaults"
-            cat > config.ci <<'EOF'
-# Core
-IMG_NAME=${IMG_NAME:-versanode-os}
-RELEASE=${RELEASE:-trixie}
-ARCH=${ARCH:-arm64}
-STAGE_LIST="${STAGE_LIST:-stage0 stage1 stage2 stage8 stage9}"
-
-# Emulation & compression
-USE_QEMU=${USE_QEMU:-1}
-DEPLOY_COMPRESSION=${DEPLOY_COMPRESSION:-xz}
-COMPRESSION_LEVEL=${COMPRESSION_LEVEL:-6}
-
-# Defaults (safe for unattended CI)
-ENABLE_SSH=${ENABLE_SSH:-1}
-PUBKEY_ONLY_SSH=${PUBKEY_ONLY_SSH:-0}
-FIRST_USER_NAME=${FIRST_USER_NAME:-versanode}
-FIRST_USER_PASS=${FIRST_USER_PASS:-versanode}
-TARGET_HOSTNAME=${TARGET_HOSTNAME:-versanode}
-DISABLE_FIRST_BOOT_USER_RENAME=${DISABLE_FIRST_BOOT_USER_RENAME:-1}
-DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-noninteractive}
-APT_LISTCHANGES_FRONTEND=${APT_LISTCHANGES_FRONTEND:-none}
-EOF
-            CONFIG_SRC=config.ci
-          fi
-
-          # Place the chosen config where pi-gen will read it, and make sure chroots can read it
-          cp -v "$CONFIG_SRC" pi-gen/config
+          cp -v config pi-gen/config
           chmod 644 pi-gen/config
+          echo "✅ Copied config into pi-gen/config"
+          echo "---- Effective pi-gen/config ----"
+          sed -n '1,40p' pi-gen/config
 
-          echo "---- effective pi-gen/config ----"
-          sed -n '1,200p' pi-gen/config
-
-      - name: 🔎 Show build.sh defaults (diagnostic)
-        run: |
-          set -euo pipefail
-          echo "---- build.sh ARCH/RELEASE defaults ----"
-          nl -ba pi-gen/build.sh | sed -n '170,200p' | sed -n '1,40p' | grep -E 'ARCH=|RELEASE=|IMG_NAME=' -n || true
-
-      - name: 🧾 Show STAGE_LIST from pi-gen/config (sanity)
-        run: |
-          set -euo pipefail
-          echo "Configured STAGE_LIST:"
-          grep -E '^\s*STAGE_LIST=' pi-gen/config || true
-
-      - name: 🏗️ Run pi-gen build (explicitly use pi-gen/config)
-        env:
-          PI_GEN_DEBUG: "1"
+      - name: 🏗️ Run pi-gen build
         run: |
           set -euo pipefail
           cd pi-gen
