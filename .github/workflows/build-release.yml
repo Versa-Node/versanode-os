@@ -8,7 +8,7 @@ on:
         default: "main"
         required: true
 
-      # Publish & artifacts
+      # Publish & artifacts (2)
       publish_release:
         description: "Publish GitHub Release?"
         type: boolean
@@ -18,59 +18,23 @@ on:
         type: boolean
         default: true
 
-      # ---- pi-gen config knobs (your defaults) ----
+      # ---- pi-gen core knobs (keep total ≤ 10) ----
       IMG_NAME:
         description: "Image name"
         default: "versanode-os"
         required: true
       RELEASE_CODENAME:
-        description: "Debian/RPiOS codename"
+        description: "Debian/RPiOS codename (e.g. trixie)"
         default: "trixie"
         required: true
       ARCH:
         description: "Target architecture"
         default: "arm64"
         required: true
-
-      ENABLE_SSH:
-        description: "Enable SSH (1/0)"
-        default: "1"
-        required: true
-      PUBKEY_ONLY_SSH:
-        description: "SSH pubkey-only (1/0)"
-        default: "0"
-        required: true
-      FIRST_USER_NAME:
-        description: "First user name"
-        default: "versanode"
-        required: true
-      FIRST_USER_PASS:
-        description: "First user password"
-        default: "versanode"
-        required: true
-      TARGET_HOSTNAME:
-        description: "Hostname"
-        default: "versanode"
-        required: true
-      DISABLE_FIRST_BOOT_USER_RENAME:
-        description: "Disable first-boot rename (1/0)"
-        default: "1"
-        required: true
-
-      DEBIAN_FRONTEND:
-        description: "Debconf frontend"
-        default: "noninteractive"
-        required: true
-      APT_LISTCHANGES_FRONTEND:
-        description: "apt-listchanges frontend"
-        default: "none"
-        required: true
-
       STAGE_LIST:
         description: "Stage list"
         default: "stage0 stage1 stage2 stage8 stage9"
         required: true
-
       USE_QEMU:
         description: "Use QEMU (1/0)"
         default: "1"
@@ -83,11 +47,6 @@ on:
         description: "Compression level"
         default: "6"
         required: true
-
-      PUBKEY_SSH_FIRST_USER:
-        description: "SSH public key for FIRST_USER (optional)"
-        default: ""
-        required: false
 
 concurrency:
   group: versanode-os-${{ github.workflow }}-${{ github.ref }}
@@ -194,26 +153,26 @@ jobs:
         run: |
           set -euo pipefail
           cat > config.ci <<'EOF'
+          # Core
           IMG_NAME=${{ inputs.IMG_NAME }}
           RELEASE=${{ inputs.RELEASE_CODENAME }}
           ARCH=${{ inputs.ARCH }}
-
-          ENABLE_SSH=${{ inputs.ENABLE_SSH }}
-          PUBKEY_ONLY_SSH=${{ inputs.PUBKEY_ONLY_SSH }}
-          FIRST_USER_NAME=${{ inputs.FIRST_USER_NAME }}
-          FIRST_USER_PASS=${{ inputs.FIRST_USER_PASS }}
-          TARGET_HOSTNAME=${{ inputs.TARGET_HOSTNAME }}
-          DISABLE_FIRST_BOOT_USER_RENAME=${{ inputs.DISABLE_FIRST_BOOT_USER_RENAME }}
-          PUBKEY_SSH_FIRST_USER=${{ inputs.PUBKEY_SSH_FIRST_USER }}
-
-          DEBIAN_FRONTEND=${{ inputs.DEBIAN_FRONTEND }}
-          APT_LISTCHANGES_FRONTEND=${{ inputs.APT_LISTCHANGES_FRONTEND }}
-
           STAGE_LIST="${{ inputs.STAGE_LIST }}"
 
+          # Emulation & compression
           USE_QEMU=${{ inputs.USE_QEMU }}
           DEPLOY_COMPRESSION=${{ inputs.DEPLOY_COMPRESSION }}
           COMPRESSION_LEVEL=${{ inputs.COMPRESSION_LEVEL }}
+
+          # Defaults (safe for unattended CI)
+          ENABLE_SSH=1
+          PUBKEY_ONLY_SSH=0
+          FIRST_USER_NAME=versanode
+          FIRST_USER_PASS=versanode
+          TARGET_HOSTNAME=versanode
+          DISABLE_FIRST_BOOT_USER_RENAME=1
+          DEBIAN_FRONTEND=noninteractive
+          APT_LISTCHANGES_FRONTEND=none
           EOF
           sed -i 's/\r$//' config.ci
           echo "---- effective config.ci ----"
@@ -222,8 +181,7 @@ jobs:
       - name: 🧾 Show STAGE_LIST (sanity)
         run: |
           set -euo pipefail
-          echo "Configured STAGE_LIST:"
-          grep -E '^\s*STAGE_LIST=' config.ci || true
+          echo "Configured STAGE_LIST:"; grep -E '^\s*STAGE_LIST=' config.ci || true
 
       - name: 🏗️ Run pi-gen build (using config.ci)
         env:
