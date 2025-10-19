@@ -13,7 +13,7 @@ DISABLE_FIRST_BOOT_USER_RENAME=1
 DEBIAN_FRONTEND=noninteractive
 APT_LISTCHANGES_FRONTEND=none
 
-STAGE_LIST="stage0 stage1 stage2 stage8 stage9 export-image"
+STAGE_LIST="stage0 stage1 stage2 stage8 stage9"
 
 USE_QEMU=1
 DEPLOY_COMPRESSION=xz

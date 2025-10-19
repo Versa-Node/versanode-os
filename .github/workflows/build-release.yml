@@ -82,6 +82,9 @@ jobs:
           echo "✅ Injected versanode-os-usermods -> stage9"
 
           # Prevent early exports from stock stages (export only once at the end)
+          touch pi-gen/stage3/SKIP || true
+          touch pi-gen/stage4/SKIP || true
+          touch pi-gen/stage5/SKIP || true
           touch pi-gen/stage2/SKIP_IMAGES || true
           touch pi-gen/stage4/SKIP_IMAGES || true
           touch pi-gen/stage5/SKIP_IMAGES || true
