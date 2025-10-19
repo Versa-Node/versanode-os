@@ -16,6 +16,64 @@ on:
         type: boolean
         default: true
 
+      # ---- pi-gen config (replaces repo-root/config) ----
+      img_name:
+        description: "IMG_NAME"
+        default: "versanode-os"
+        required: true
+      release_codename:
+        description: "RELEASE (bookworm/trixie)"
+        default: "trixie"
+        required: true
+      arch:
+        description: "ARCH"
+        default: "arm64"
+        required: true
+
+      enable_ssh:
+        description: "ENABLE_SSH"
+        type: boolean
+        default: true
+      pubkey_only_ssh:
+        description: "PUBKEY_ONLY_SSH"
+        type: boolean
+        default: false
+
+      first_user_name:
+        description: "FIRST_USER_NAME"
+        default: "versanode"
+        required: true
+      first_user_pass:
+        description: "FIRST_USER_PASS"
+        default: "versanode"
+        required: true
+      target_hostname:
+        description: "TARGET_HOSTNAME"
+        default: "versanode"
+        required: true
+      disable_first_boot_user_rename:
+        description: "DISABLE_FIRST_BOOT_USER_RENAME"
+        type: boolean
+        default: true
+
+      use_qemu:
+        description: "USE_QEMU"
+        type: boolean
+        default: true
+      deploy_compression:
+        description: "DEPLOY_COMPRESSION"
+        default: "xz"
+        required: true
+      compression_level:
+        description: "COMPRESSION_LEVEL"
+        default: "6"
+        required: true
+
+      stage_list:
+        description: 'STAGE_LIST (space-separated; export-image will be added automatically if missing)'
+        default: "stage0 stage1 stage2 stage8 stage9"
+        required: true
+
 concurrency:
   group: versanode-os-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -27,24 +85,16 @@ jobs:
       contents: write
 
     steps:
-      - name: 🧹 Free up disk space
+      - name: 🧹 Free up disk space (optimized)
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: true
-          android: true
+          android: false
           dotnet: true
-          haskell: true
-          large-packages: true
+          haskell: false
+          large-packages: false
           docker-images: true
-          swap-storage: true
-
-      - name: 🧽 Extra prune & show free space
-        run: |
-          docker system prune -af || true
-          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /opt/hostedtoolcache || true
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-          df -h
+          swap-storage: false
 
       - name: 📦 Checkout repo with submodules
         uses: actions/checkout@v4
@@ -61,16 +111,13 @@ jobs:
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
 
-      - name: 🔍 Verify submodules and root config
+      - name: 🔍 Verify submodules present
         run: |
           set -euo pipefail
           [ -d pi-gen ] || { echo "pi-gen missing"; exit 2; }
           [ -d versanode-os-kmods ] || { echo "versanode-os-kmods missing"; exit 3; }
           [ -d versanode-os-usermods ] || { echo "versanode-os-usermods missing"; exit 4; }
-          [ -f config ] || { echo "root-level config missing"; exit 5; }
-          echo "✅ pi-gen, kmods, usermods, and root config present."
-          echo "---- config preview ----"
-          sed -n '1,200p' config
+          echo "✅ pi-gen, kmods, usermods present."
 
       - name: 🧩 Inject custom stages into pi-gen
         run: |
@@ -97,14 +144,14 @@ jobs:
           fi
           EOF
 
-      - name: 🛠️ Normalize line endings & ensure exec bits (stage8 & stage9)
+      - name: 🛠️ Normalize endings & ensure exec bits (stage8 & stage9)
         run: |
           set -euo pipefail
           for s in stage8 stage9; do
             d="pi-gen/$s"
             [ -d "$d" ] || { echo "Missing $d"; exit 6; }
 
-            # Fix CRLF on all shell scripts we care about
+            # CRLF → LF on expected script files
             find "$d" -type f \( -name 'prerun.sh' -o -name '*-run.sh' -o -name '*-run-chroot.sh' \) \
               -exec sed -i 's/\r$//' {} \;
 
@@ -124,14 +171,57 @@ jobs:
             done
           done
 
-      - name: 🧾 Show STAGE_LIST from config (sanity)
+      - name: 📝 Generate pi-gen config (from inputs)
         run: |
           set -euo pipefail
-          echo "Configured STAGE_LIST (if present):"
-          grep -E '^\s*STAGE_LIST=' config || true
-          echo "NOTE: It must include 'stage8 stage9 export-image' in the desired order."
 
-      - name: 🏗️ Run pi-gen build (load config from repo root)
+          # Map booleans (GitHub inputs are strings) to 1/0
+          b2i() { [ "$1" = "true" ] && echo 1 || echo 0; }
+
+          ENABLE_SSH=$(b2i "${{ inputs.enable_ssh }}")
+          PUBKEY_ONLY_SSH=$(b2i "${{ inputs.pubkey_only_ssh }}")
+          DISABLE_FIRST_BOOT_USER_RENAME=$(b2i "${{ inputs.disable_first_boot_user_rename }}")
+          USE_QEMU=$(b2i "${{ inputs.use_qemu }}")
+
+          # Ensure export-image is included once, at the end
+          STAGES="${{ inputs.stage_list }}"
+          case " $STAGES " in
+            *" export-image "*) : ;;
+            *) STAGES="$STAGES export-image" ;;
+          esac
+
+          cat > config <<EOF
+          IMG_NAME=${{ inputs.img_name }}
+          RELEASE=${{ inputs.release_codename }}
+          ARCH=${{ inputs.arch }}
+
+          ENABLE_SSH=${ENABLE_SSH}
+          PUBKEY_ONLY_SSH=${PUBKEY_ONLY_SSH}
+          FIRST_USER_NAME=${{ inputs.first_user_name }}
+          FIRST_USER_PASS=${{ inputs.first_user_pass }}
+          TARGET_HOSTNAME=${{ inputs.target_hostname }}
+          DISABLE_FIRST_BOOT_USER_RENAME=${DISABLE_FIRST_BOOT_USER_RENAME}
+
+          DEBIAN_FRONTEND=noninteractive
+          APT_LISTCHANGES_FRONTEND=none
+
+          STAGE_LIST="${STAGES}"
+
+          USE_QEMU=${USE_QEMU}
+          DEPLOY_COMPRESSION=${{ inputs.deploy_compression }}
+          COMPRESSION_LEVEL=${{ inputs.compression_level }}
+          EOF
+
+          echo "---- generated config ----"
+          sed -n '1,200p' config
+
+      - name: 🧾 Show STAGE_LIST (sanity)
+        run: |
+          set -euo pipefail
+          echo "Configured STAGE_LIST:"
+          grep -E '^\s*STAGE_LIST=' config || true
+
+      - name: 🏗️ Run pi-gen build (use generated config)
         env:
           PI_GEN_DEBUG: "1"
         run: |
