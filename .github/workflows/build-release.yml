@@ -130,27 +130,27 @@ jobs:
           else
             echo "Synthesizing config.ci with VersaNode defaults"
             cat > config.ci <<'EOF'
-            # Core
-            IMG_NAME=${IMG_NAME:-versanode-os}
-            RELEASE=${RELEASE:-trixie}
-            ARCH=${ARCH:-arm64}
-            STAGE_LIST="${STAGE_LIST:-stage0 stage1 stage2 stage8 stage9 export-image}"
+# Core
+IMG_NAME=${IMG_NAME:-versanode-os}
+RELEASE=${RELEASE:-trixie}
+ARCH=${ARCH:-arm64}
+STAGE_LIST="${STAGE_LIST:-stage0 stage1 stage2 stage8 stage9}"
 
-            # Emulation & compression
-            USE_QEMU=${USE_QEMU:-1}
-            DEPLOY_COMPRESSION=${DEPLOY_COMPRESSION:-xz}
-            COMPRESSION_LEVEL=${COMPRESSION_LEVEL:-6}
+# Emulation & compression
+USE_QEMU=${USE_QEMU:-1}
+DEPLOY_COMPRESSION=${DEPLOY_COMPRESSION:-xz}
+COMPRESSION_LEVEL=${COMPRESSION_LEVEL:-6}
 
-            # Defaults (safe for unattended CI)
-            ENABLE_SSH=${ENABLE_SSH:-1}
-            PUBKEY_ONLY_SSH=${PUBKEY_ONLY_SSH:-0}
-            FIRST_USER_NAME=${FIRST_USER_NAME:-versanode}
-            FIRST_USER_PASS=${FIRST_USER_PASS:-versanode}
-            TARGET_HOSTNAME=${TARGET_HOSTNAME:-versanode}
-            DISABLE_FIRST_BOOT_USER_RENAME=${DISABLE_FIRST_BOOT_USER_RENAME:-1}
-            DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-noninteractive}
-            APT_LISTCHANGES_FRONTEND=${APT_LISTCHANGES_FRONTEND:-none}
-            EOF
+# Defaults (safe for unattended CI)
+ENABLE_SSH=${ENABLE_SSH:-1}
+PUBKEY_ONLY_SSH=${PUBKEY_ONLY_SSH:-0}
+FIRST_USER_NAME=${FIRST_USER_NAME:-versanode}
+FIRST_USER_PASS=${FIRST_USER_PASS:-versanode}
+TARGET_HOSTNAME=${TARGET_HOSTNAME:-versanode}
+DISABLE_FIRST_BOOT_USER_RENAME=${DISABLE_FIRST_BOOT_USER_RENAME:-1}
+DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-noninteractive}
+APT_LISTCHANGES_FRONTEND=${APT_LISTCHANGES_FRONTEND:-none}
+EOF
             CONFIG_SRC=config.ci
           fi
 
