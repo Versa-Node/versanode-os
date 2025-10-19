@@ -48,8 +48,8 @@ The default VersNode OS is built with the headles / lite configuration. Extended
 |------:|--------------|
 | **stage0–2** | Base Raspberry Pi OS, firmware, kernel, and core setup. |
 | **~~stage3–5~~** | ~~=Stages for desktop and extra packages.~~ |
-| **stage8** | **Copied from kmods submodule** — builds/installs VersaNode-specific kernel modules. |
-| **stage9** | **Copied from usermods submodule** — installs Cockpit, configures Nginx/TLS & reverse-proxy, removes unused stacks, and adds VersaNode tooling. |
+| **stage8** | **VersaNode OS Kmods submodule** — Kernel-level modifications to the OS image.|
+| **stage9** | **Versanode OS Usermods submodule** — User-level modifications to the OS image. |
 
 ### Variants and their stage lists
 
@@ -57,7 +57,7 @@ The default VersNode OS is built with the headles / lite configuration. Extended
   `stage0 stage1 stage2 stage8 stage9`
 
 > The _Normal_ and _Full_ variants include additional official pi-gen stages for desktop/extras.  
-> The _Lite_ variant skips those to keep the image lean.
+> The _Lite_ variant skips those to keep the image lean. See [pi-gen](https://github.com/RPi-Distro/pi-gen) for more info.
 
 ---
 
