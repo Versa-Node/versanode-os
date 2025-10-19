@@ -1,6 +1,5 @@
 IMG_NAME=versanode-os
 RELEASE=trixie
-ARCH=arm64
 
 ENABLE_SSH=1
 PUBKEY_ONLY_SSH=0
