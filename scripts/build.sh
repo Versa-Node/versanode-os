@@ -15,16 +15,6 @@ if [ -f "$ROOT/.gitmodules" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 🔧 Patch pi-gen/build.sh to respect ARCH from config
-# ---------------------------------------------------------------------------
-if grep -q '^export ARCH=armhf' "$PI_GEN_DIR/build.sh"; then
-  echo ">> Patching pi-gen/build.sh to make ARCH configurable..."
-  sudo sed -i 's/^export ARCH=armhf$/export ARCH="${ARCH:-armhf}"/' "$PI_GEN_DIR/build.sh"
-else
-  echo ">> ARCH line already flexible or not found — skipping patch."
-fi
-
-# ---------------------------------------------------------------------------
 # 🧱 Inject VersaNode stages
 # ---------------------------------------------------------------------------
 if [ -d "$ROOT/versanode-os-kmods" ]; then
