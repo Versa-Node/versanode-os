@@ -7,9 +7,7 @@ on:
         description: "Git ref to build (branch or tag)"
         default: "main"
         required: true
-
-      # Publish & artifacts (2)
-      publish_release:
+      release:
         description: "Publish GitHub Release?"
         type: boolean
         default: true
@@ -17,36 +15,6 @@ on:
         description: "Upload build artifacts?"
         type: boolean
         default: true
-
-      # ---- pi-gen core knobs (keep total ≤ 10) ----
-      IMG_NAME:
-        description: "Image name"
-        default: "versanode-os"
-        required: true
-      RELEASE_CODENAME:
-        description: "Debian/RPiOS codename (e.g. trixie)"
-        default: "trixie"
-        required: true
-      ARCH:
-        description: "Target architecture"
-        default: "arm64"
-        required: true
-      STAGE_LIST:
-        description: "Stage list"
-        default: "stage0 stage1 stage2 stage8 stage9"
-        required: true
-      USE_QEMU:
-        description: "Use QEMU (1/0)"
-        default: "1"
-        required: true
-      DEPLOY_COMPRESSION:
-        description: "Deploy compression (xz/zip/none)"
-        default: "xz"
-        required: true
-      COMPRESSION_LEVEL:
-        description: "Compression level"
-        default: "6"
-        required: true
 
 concurrency:
   group: versanode-os-${{ github.workflow }}-${{ github.ref }}
@@ -59,16 +27,24 @@ jobs:
       contents: write
 
     steps:
-      - name: 🧹 Free up disk space (optimized)
+      - name: 🧹 Free up disk space
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: true
-          android: false
+          android: true
           dotnet: true
-          haskell: false
-          large-packages: false
+          haskell: true
+          large-packages: true
           docker-images: true
-          swap-storage: false
+          swap-storage: true
+
+      - name: 🧽 Extra prune & show free space
+        run: |
+          docker system prune -af || true
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /opt/hostedtoolcache || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
 
       - name: 📦 Checkout repo with submodules
         uses: actions/checkout@v4
@@ -85,13 +61,19 @@ jobs:
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
 
-      - name: 🔍 Verify submodules present
+      - name: 🔍 Verify submodules and root config presence
         run: |
           set -euo pipefail
           [ -d pi-gen ] || { echo "pi-gen missing"; exit 2; }
           [ -d versanode-os-kmods ] || { echo "versanode-os-kmods missing"; exit 3; }
           [ -d versanode-os-usermods ] || { echo "versanode-os-usermods missing"; exit 4; }
-          echo "✅ Submodules present."
+          echo "✅ pi-gen, kmods, usermods present."
+          if [ -f config ]; then
+            echo "---- repo-root config (preview) ----"
+            sed -n '1,200p' config
+          else
+            echo "ℹ️ repo-root config not found; will synthesize config.ci"
+          fi
 
       - name: 🧩 Inject custom stages into pi-gen
         run: |
@@ -102,7 +84,7 @@ jobs:
           echo "✅ Injected versanode-os-kmods -> stage8"
           echo "✅ Injected versanode-os-usermods -> stage9"
 
-          # Skip desktop stages; export only once at the end
+          # Prevent early exports from stock stages (export only once at the end)
           touch pi-gen/stage3/SKIP || true
           touch pi-gen/stage4/SKIP || true
           touch pi-gen/stage5/SKIP || true
@@ -110,7 +92,7 @@ jobs:
           touch pi-gen/stage4/SKIP_IMAGES || true
           touch pi-gen/stage5/SKIP_IMAGES || true
 
-          # Ensure final export (stage9)
+          # Ensure final export happens after our custom stage9
           cat > pi-gen/stage9/EXPORT_IMAGE <<'EOF'
           IMG_SUFFIX=""
           if [ "${USE_QEMU}" = "1" ]; then
@@ -118,16 +100,18 @@ jobs:
           fi
           EOF
 
-      - name: 🛠️ Normalize line endings & exec bits (stage8 & stage9)
+      - name: 🛠️ Normalize line endings & ensure exec bits (stage8 & stage9)
         run: |
           set -euo pipefail
           for s in stage8 stage9; do
             d="pi-gen/$s"
             [ -d "$d" ] || { echo "Missing $d"; exit 6; }
 
+            # Fix CRLF on shell scripts
             find "$d" -type f \( -name 'prerun.sh' -o -name '*-run.sh' -o -name '*-run-chroot.sh' \) \
               -exec sed -i 's/\r$//' {} \;
 
+            # Ensure executables
             [ -f "$d/prerun.sh" ] && chmod +x "$d/prerun.sh" || true
             find "$d" -maxdepth 2 -type f -name '*-run.sh' -exec chmod +x {} \;
             find "$d" -maxdepth 2 -type f -name '*-run-chroot.sh' -exec chmod +x {} \;
@@ -136,63 +120,66 @@ jobs:
             ls -l "$d" || true
           done
 
-      - name: 🩹 Make pi-gen defaults overridable
-        working-directory: pi-gen
+      - name: 🧾 Prepare pi-gen/config (source of truth)
         run: |
           set -euo pipefail
-          sed -i 's/\r$//' build.sh
-          sed -i -E \
-            -e 's/^export[[:space:]]+ARCH=([a-z0-9]+)$/export ARCH=${ARCH:-\1}/' \
-            -e 's/^export[[:space:]]+RELEASE=([a-z0-9_-]+)[[:space:]]+#/export RELEASE=${RELEASE:-\1} #/' \
-            -e 's/^export[[:space:]]+IMG_NAME="\$\{IMG_NAME:-raspios-\$RELEASE-\$ARCH\}"/export IMG_NAME=${IMG_NAME:-raspios-$RELEASE-$ARCH}/' \
-            build.sh || true
-          echo "---- build.sh ARCH/RELEASE lines ----"
-          grep -nE 'export[[:space:]]+(ARCH|RELEASE|IMG_NAME)=' build.sh || true
 
-      - name: 📝 Generate pi-gen config from inputs
+          if [ -f config ]; then
+            echo "Using repo-root ./config"
+            CONFIG_SRC=config
+          else
+            echo "Synthesizing config.ci with VersaNode defaults"
+            cat > config.ci <<'EOF'
+            # Core
+            IMG_NAME=${IMG_NAME:-versanode-os}
+            RELEASE=${RELEASE:-trixie}
+            ARCH=${ARCH:-arm64}
+            STAGE_LIST="${STAGE_LIST:-stage0 stage1 stage2 stage8 stage9 export-image}"
+
+            # Emulation & compression
+            USE_QEMU=${USE_QEMU:-1}
+            DEPLOY_COMPRESSION=${DEPLOY_COMPRESSION:-xz}
+            COMPRESSION_LEVEL=${COMPRESSION_LEVEL:-6}
+
+            # Defaults (safe for unattended CI)
+            ENABLE_SSH=${ENABLE_SSH:-1}
+            PUBKEY_ONLY_SSH=${PUBKEY_ONLY_SSH:-0}
+            FIRST_USER_NAME=${FIRST_USER_NAME:-versanode}
+            FIRST_USER_PASS=${FIRST_USER_PASS:-versanode}
+            TARGET_HOSTNAME=${TARGET_HOSTNAME:-versanode}
+            DISABLE_FIRST_BOOT_USER_RENAME=${DISABLE_FIRST_BOOT_USER_RENAME:-1}
+            DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-noninteractive}
+            APT_LISTCHANGES_FRONTEND=${APT_LISTCHANGES_FRONTEND:-none}
+            EOF
+            CONFIG_SRC=config.ci
+          fi
+
+          # Place the chosen config where pi-gen will read it, and make sure chroots can read it
+          cp -v "$CONFIG_SRC" pi-gen/config
+          chmod 644 pi-gen/config
+
+          echo "---- effective pi-gen/config ----"
+          sed -n '1,200p' pi-gen/config
+
+      - name: 🔎 Show build.sh defaults (diagnostic)
         run: |
           set -euo pipefail
-          cat > config.ci <<'EOF'
-          # Core
-          IMG_NAME=${{ inputs.IMG_NAME }}
-          RELEASE=${{ inputs.RELEASE_CODENAME }}
-          ARCH=${{ inputs.ARCH }}
-          STAGE_LIST="${{ inputs.STAGE_LIST }}"
+          echo "---- build.sh ARCH/RELEASE defaults ----"
+          nl -ba pi-gen/build.sh | sed -n '170,200p' | sed -n '1,40p' | grep -E 'ARCH=|RELEASE=|IMG_NAME=' -n || true
 
-          # Emulation & compression
-          USE_QEMU=${{ inputs.USE_QEMU }}
-          DEPLOY_COMPRESSION=${{ inputs.DEPLOY_COMPRESSION }}
-          COMPRESSION_LEVEL=${{ inputs.COMPRESSION_LEVEL }}
-
-          # Defaults (safe for unattended CI)
-          ENABLE_SSH=1
-          PUBKEY_ONLY_SSH=0
-          FIRST_USER_NAME=versanode
-          FIRST_USER_PASS=versanode
-          TARGET_HOSTNAME=versanode
-          DISABLE_FIRST_BOOT_USER_RENAME=1
-          DEBIAN_FRONTEND=noninteractive
-          APT_LISTCHANGES_FRONTEND=none
-          EOF
-          sed -i 's/\r$//' config.ci
-          echo "---- effective config.ci ----"
-          sed -n '1,200p' config.ci
-
-      - name: 🧾 Show STAGE_LIST (sanity)
+      - name: 🧾 Show STAGE_LIST from pi-gen/config (sanity)
         run: |
           set -euo pipefail
-          echo "Configured STAGE_LIST:"; grep -E '^\s*STAGE_LIST=' config.ci || true
+          echo "Configured STAGE_LIST:"
+          grep -E '^\s*STAGE_LIST=' pi-gen/config || true
 
-      - name: 🏗️ Run pi-gen build (using config.ci)
+      - name: 🏗️ Run pi-gen build (explicitly use pi-gen/config)
         env:
           PI_GEN_DEBUG: "1"
         run: |
           set -euo pipefail
           cd pi-gen
-          echo "==== pi-gen commit ===="
-          git rev-parse --short HEAD || true
-          echo "==== starting build ===="
-          sudo -E bash ./build.sh -c ../config.ci
+          sudo -E bash ./build.sh -c ./config
 
       - name: 📂 Collect build artifacts
         run: |
@@ -208,7 +195,7 @@ jobs:
           path: artifacts/*
 
       - name: 🚀 Create GitHub Release
-        if: ${{ inputs.publish_release }}
+        if: ${{ inputs.release }}
         uses: softprops/action-gh-release@v2
         with:
           name: "VersaNode OS build ${{ github.run_number }}"
