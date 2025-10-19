@@ -61,62 +61,31 @@ jobs:
             libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc gpg pigz xxd bmap-tools \
             kpartx kmod arch-test ca-certificates
 
-      - name: 🔍 Verify submodules and root config presence
+      - name: 🔍 Verify submodules and config presence
         run: |
           set -euo pipefail
-          [ -d pi-gen ] || { echo "pi-gen missing"; exit 2; }
-          [ -d versanode-os-kmods ] || { echo "versanode-os-kmods missing"; exit 3; }
-          [ -d versanode-os-usermods ] || { echo "versanode-os-usermods missing"; exit 4; }
+          [ -d pi-gen ] || { echo "::error::pi-gen missing"; exit 2; }
+          [ -d versanode-os-kmods ] || { echo "::error::versanode-os-kmods missing"; exit 3; }
+          [ -d versanode-os-usermods ] || { echo "::error::versanode-os-usermods missing"; exit 4; }
+          [ -f config ] || { echo "::error::Missing root config file!"; exit 5; }
+          [ -f scripts/build.sh ] || { echo "::error::Missing scripts/build.sh"; exit 6; }
 
-          if [ ! -f config ]; then
-            echo "::error::Missing root config file! You must include a config at repo root."
-            exit 5
-          fi
-
-          echo "✅ pi-gen, kmods, usermods, and config found."
-          echo "---- Root config preview ----"
+          echo "✅ Repository layout verified."
+          echo "---- config preview ----"
           sed -n '1,40p' config
 
-      - name: 🧩 Inject custom stages into pi-gen
+      - name: 🧩 Inject custom stages
         run: |
           set -euo pipefail
           rm -rf pi-gen/stage8 pi-gen/stage9
           cp -a versanode-os-kmods    pi-gen/stage8
           cp -a versanode-os-usermods pi-gen/stage9
-          echo "✅ Injected custom stages"
+          echo "✅ Injected custom stages."
 
-          # Ensure export only happens once (final image from stage9)
-          cat > pi-gen/stage9/EXPORT_IMAGE <<'EOF'
-          IMG_SUFFIX=""
-          if [ "${USE_QEMU}" = "1" ]; then
-            IMG_SUFFIX="${IMG_SUFFIX}-qemu"
-          fi
-          EOF
-
-      - name: 🛠️ Normalize line endings & permissions
+      - name: 🏗️ Run full build script
         run: |
-          set -euo pipefail
-          for s in stage8 stage9; do
-            d="pi-gen/$s"
-            find "$d" -type f -name '*.sh' -exec sed -i 's/\r$//' {} \;
-            find "$d" -type f -name '*.sh' -exec chmod +x {} \;
-            echo "✅ normalized scripts in $s"
-          done
-
-      - name: 🧾 Copy config file into pi-gen
-        run: |
-          set -euo pipefail
-          cp -v config pi-gen/config
-          chmod 644 pi-gen/config
-          echo "✅ Copied config into pi-gen/config"
-          echo "---- Effective pi-gen/config ----"
-          sed -n '1,40p' pi-gen/config
-
-      - name: 🏗️ Run pi-gen build
-        run: |
-          set -euo pipefail
-          cd pi-gen
-          sudo -E bash ./build.sh -c ./config
+          chmod +x scripts/build.sh
+          sudo ./scripts/build.sh
 
       - name: 📂 Collect build artifacts
         run: |
