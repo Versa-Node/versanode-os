@@ -9,7 +9,7 @@ on:
         required: true
 
       # Publish & artifacts
-      release:
+      publish_release:
         description: "Publish GitHub Release?"
         type: boolean
         default: true
@@ -23,7 +23,7 @@ on:
         description: "Image name"
         default: "versanode-os"
         required: true
-      RELEASE:
+      RELEASE_CODENAME:
         description: "Debian/RPiOS codename"
         default: "trixie"
         required: true
@@ -182,8 +182,6 @@ jobs:
         run: |
           set -euo pipefail
           sed -i 's/\r$//' build.sh
-          # Make common hard-coded exports overridable with ${VAR:-default}
-          # Only touch simple cases to avoid over-patching.
           sed -i -E \
             -e 's/^export[[:space:]]+ARCH=([a-z0-9]+)$/export ARCH=${ARCH:-\1}/' \
             -e 's/^export[[:space:]]+RELEASE=([a-z0-9_-]+)[[:space:]]+#/export RELEASE=${RELEASE:-\1} #/' \
@@ -197,7 +195,7 @@ jobs:
           set -euo pipefail
           cat > config.ci <<'EOF'
           IMG_NAME=${{ inputs.IMG_NAME }}
-          RELEASE=${{ inputs.RELEASE }}
+          RELEASE=${{ inputs.RELEASE_CODENAME }}
           ARCH=${{ inputs.ARCH }}
 
           ENABLE_SSH=${{ inputs.ENABLE_SSH }}
@@ -226,7 +224,6 @@ jobs:
           set -euo pipefail
           echo "Configured STAGE_LIST:"
           grep -E '^\s*STAGE_LIST=' config.ci || true
-          echo "It should include 'stage8 stage9' and export will be added via EXPORT_IMAGE."
 
       - name: 🏗️ Run pi-gen build (using config.ci)
         env:
@@ -253,7 +250,7 @@ jobs:
           path: artifacts/*
 
       - name: 🚀 Create GitHub Release
-        if: ${{ inputs.release }}
+        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
           name: "VersaNode OS build ${{ github.run_number }}"
