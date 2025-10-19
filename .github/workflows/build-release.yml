@@ -82,10 +82,34 @@ jobs:
           cp -a versanode-os-usermods pi-gen/stage9
           echo "✅ Injected custom stages."
 
+      - name: 📝 Write config for pi-gen
+        run: |
+          cat <<EOF > config
+          ARCH=arm64
+          RELEASE=trixie
+          IMG_NAME=versanode-os
+          ENABLE_SSH=1
+          PUBKEY_ONLY_SSH=0
+          FIRST_USER_NAME=versanode
+          FIRST_USER_PASS=versanode
+          TARGET_HOSTNAME=versanode
+          DISABLE_FIRST_BOOT_USER_RENAME=1
+          DEBIAN_FRONTEND=noninteractive
+          DEPLOY_COMPRESSION=xz
+          COMPRESSION_LEVEL=6
+          USE_QEMU=1
+          DEPLOY_MINIMIZEFS=0
+          ROOT_MARGIN=256
+          STAGE_LIST="stage0 stage1 stage2 stage8 stage9"
+          TARGET_IMAGE_SIZE=4096
+          EOF
+
+      - name: 🔧 Make scripts executable
+        run: chmod +x ./scripts/build.sh || true
+
       - name: 🏗️ Run full build script
         run: |
-          chmod +x scripts/build.sh
-          sudo ./scripts/build.sh
+          ./scripts/build.sh
 
       - name: 📂 Collect build artifacts
         run: |
