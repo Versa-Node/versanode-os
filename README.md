@@ -16,7 +16,9 @@
   </a>
 </p>
 
-<img src="docs/media/logo-white.png" alt="VersaNode OS logo" width="50%"/>
+<p align="center">
+  <img src="docs/media/logo-white.png" alt="VersaNode OS logo" width="50%"/>
+</p>
 
 ---
 
