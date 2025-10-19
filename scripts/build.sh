@@ -23,14 +23,13 @@ if [ -d "$ROOT/versanode-os-usermods" ]; then
   rsync -a --delete "$ROOT/versanode-os-usermods/" "$PI_GEN_DIR/stage9/"
 fi
 
-# Ensure all scripts are executable and Unix format
+# Ensure all scripts are executable
 find "$PI_GEN_DIR" -type f -name '*.sh' -exec chmod +x {} \;
-find "$PI_GEN_DIR" -type f -name '*.sh' -exec sed -i 's/\r$//' {} \;
 
 # Copy config into pi-gen
 echo ">> Copying config into pi-gen/config..."
 cp -f "$ROOT/config" "$PI_GEN_DIR/config"
-chmod 644 "$PI_GEN_DIR/config"
+
 
 # Extract key values (for logs)
 IMG_NAME="$(grep -E '^IMG_NAME=' "$PI_GEN_DIR/config" | cut -d= -f2- | tr -d '"')"
