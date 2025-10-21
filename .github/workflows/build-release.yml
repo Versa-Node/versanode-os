@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: 🧹 Free up disk space
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -70,6 +69,8 @@ jobs:
         run: chmod +x ./scripts/build.sh || true
 
       - name: 🏗️ Run full build script
+        env:
+          GHCR_READ_PACKAGES_PUBLIC: ${{ secrets.GHCR_READ_PACKAGES_PUBLIC }}
         run: |
           ./scripts/build.sh
 
@@ -105,3 +106,4 @@ jobs:
 
             ---
             💡 *This release may include new kernel, service, or web UI updates depending on the pipeline stage.*
+
