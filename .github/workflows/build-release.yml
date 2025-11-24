@@ -46,7 +46,7 @@ jobs:
           df -h
 
       - name: 📦 Checkout repo with submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
           submodules: recursive
